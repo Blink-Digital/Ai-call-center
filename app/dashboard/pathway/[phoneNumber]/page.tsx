@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FlowchartBuilder } from "@/components/flowchart-builder/flowchart-builder"
 import { formatPhoneNumber } from "@/utils/phone-utils"
-import { supabase } from "@/lib/supabase"
+import { lookupPathwayIdClientSide } from "@/lib/client-pathway-lookup"
 
 interface PathwayEditorPageProps {
   params: {
@@ -16,37 +16,60 @@ interface PathwayEditorPageProps {
 
 export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { phoneNumber } = params
+
   const [formattedNumber, setFormattedNumber] = useState<string>("")
   const [pathwayInfo, setPathwayInfo] = useState<any>(null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(true)
 
+  // Check if pathway info was passed via URL params (optimization)
+  const preloadedPathwayId = searchParams.get("pathwayId")
+  const preloadedPathwayName = searchParams.get("pathwayName")
+
   useEffect(() => {
     // Format the phone number for display
     if (phoneNumber) {
-      // Add the country code if it's not there
       const e164Number = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
-
       setFormattedNumber(formatPhoneNumber(e164Number))
     }
   }, [phoneNumber])
 
   const fetchPathwayInfo = async () => {
     try {
-      // Get current user
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) return
+      // If pathway info was passed via URL params, use it directly (optimization)
+      if (preloadedPathwayId) {
+        console.log("[PATHWAY-PAGE] ✅ Using preloaded pathway info from URL")
+        setPathwayInfo({
+          pathway_id: preloadedPathwayId,
+          pathway_name: preloadedPathwayName || null,
+        })
+        setIsLoadingPathway(false)
+        return
+      }
 
-      const response = await fetch(`/api/phone-numbers/${phoneNumber}/pathway?userId=${user.id}`)
-      const result = await response.json()
+      // Otherwise, fetch from API using the fixed lookup function
+      console.log("[PATHWAY-PAGE] 🔍 Fetching pathway info from API...")
 
-      if (result.success) {
-        setPathwayInfo(result.data)
+      const result = await lookupPathwayIdClientSide(phoneNumber)
+
+      if (result.error) {
+        console.error("[PATHWAY-PAGE] ❌ Lookup error:", result.error)
+        setPathwayInfo(null)
+      } else if (result.pathway_id) {
+        console.log("[PATHWAY-PAGE] ✅ Pathway found:", result.pathway_id)
+        setPathwayInfo({
+          pathway_id: result.pathway_id,
+          pathway_name: result.pathway_name,
+          pathway_description: result.pathway_description,
+        })
+      } else {
+        console.log("[PATHWAY-PAGE] ℹ️ No existing pathway found")
+        setPathwayInfo(null)
       }
     } catch (error) {
-      console.error("Error fetching pathway info:", error)
+      console.error("[PATHWAY-PAGE] ❌ Error fetching pathway info:", error)
+      setPathwayInfo(null)
     } finally {
       setIsLoadingPathway(false)
     }
@@ -56,7 +79,7 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
     if (phoneNumber) {
       fetchPathwayInfo()
     }
-  }, [phoneNumber])
+  }, [phoneNumber, preloadedPathwayId])
 
   const handleAIGeneratorClick = () => {
     router.push(`/dashboard/call-flows/generate?phoneNumber=${phoneNumber}`)
@@ -71,14 +94,7 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
           </Button>
           <h1 className="text-2xl font-bold">Pathway for {formattedNumber}</h1>
           {pathwayInfo?.pathway_id && (
-            <div className="text-sm text-gray-600">
-              Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}
-              {pathwayInfo.last_deployed_at && (
-                <span className="ml-2">
-                  (Last deployed: {new Date(pathwayInfo.last_deployed_at).toLocaleDateString()})
-                </span>
-              )}
-            </div>
+            <div className="text-sm text-gray-600">Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}</div>
           )}
         </div>
         <div className="flex gap-2">
@@ -89,7 +105,11 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
         </div>
       </div>
       <div className="flex-1 overflow-hidden">
-        <FlowchartBuilder phoneNumber={phoneNumber} />
+        <FlowchartBuilder
+          phoneNumber={phoneNumber}
+          initialPathwayId={pathwayInfo?.pathway_id}
+          initialPathwayName={pathwayInfo?.pathway_name}
+        />
       </div>
     </div>
   )
