@@ -1,69 +1,37 @@
-import type { NextRequest } from "next/server"
-import { supabase } from "./supabase"
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
 import { cookies } from "next/headers"
-import { createServerClient } from "@supabase/ssr"
+import type { Database } from "@/types/supabase"
 
-export async function getUserFromRequest(req: NextRequest) {
+// Get user from server-side request (for API routes)
+export async function getUserFromRequest() {
   try {
-    // Get the token from the request
-    const authHeader = req.headers.get("authorization")
-    let token: string | undefined
+    const supabase = createRouteHandlerClient<Database>({ cookies })
 
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.substring(7)
-    } else {
-      // Try to get token from cookie
-      const cookieStore = cookies()
-      const supabaseClient = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            get(name: string) {
-              return cookieStore.get(name)?.value
-            },
-          },
-        },
-      )
-
-      const {
-        data: { session },
-      } = await supabaseClient.auth.getSession()
-      token = session?.access_token
-    }
-
-    if (!token) {
-      return null
-    }
-
-    // Verify the token and get user
     const {
       data: { user },
       error,
-    } = await supabase.auth.getUser(token)
+    } = await supabase.auth.getUser()
 
-    if (error || !user) {
-      console.error("Error getting user from token:", error)
+    if (error) {
+      console.error("Auth error:", error.message)
       return null
     }
 
-    // Get additional user data from the database
-    const { data: userData, error: userError } = await supabase.from("users").select("*").eq("id", user.id).single()
-
-    if (userError) {
-      console.error("Error getting user data:", userError)
-      // Return basic user info if we can't get the full profile
-      return {
-        id: user.id,
-        email: user.email,
-        name: user.user_metadata?.name,
-        role: "user",
-      }
-    }
-
-    return userData
+    return user
   } catch (error) {
-    console.error("Error in getUserFromRequest:", error)
+    console.error("Failed to get user from request:", error)
     return null
   }
+}
+
+// Check if user is authenticated (for API routes)
+export async function isAuthenticated(): Promise<boolean> {
+  const user = await getUserFromRequest()
+  return !!user
+}
+
+// Get user ID from server-side request (for API routes)
+export async function getUserId(): Promise<string | null> {
+  const user = await getUserFromRequest()
+  return user?.id || null
 }

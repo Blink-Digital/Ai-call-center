@@ -2,11 +2,18 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Sparkles } from 'lucide-react'
+import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FlowchartBuilder } from "@/components/flowchart-builder/flowchart-builder"
 import { formatPhoneNumber } from "@/utils/phone-utils"
-import { lookupPathwayIdClientSide, lookupPathwayIdDirectSupabase } from "@/lib/client-pathway-lookup"
+import { useAuth } from "@/contexts/auth-context" // ✅ Use modern auth context
+
+interface PathwayInfo {
+  pathway_id: string | null
+  pathway_name: string | null
+  pathway_description: string | null
+  last_deployed_at?: string
+}
 
 interface PathwayEditorPageProps {
   params: {
@@ -20,8 +27,9 @@ interface PathwayEditorPageProps {
 
 export default function PathwayEditorPage({ params, searchParams }: PathwayEditorPageProps) {
   const router = useRouter()
+  const { user, loading: authLoading } = useAuth() // ✅ Use shared auth context
   const [formattedNumber, setFormattedNumber] = useState<string>("")
-  const [pathwayInfo, setPathwayInfo] = useState<any>(null)
+  const [pathwayInfo, setPathwayInfo] = useState<PathwayInfo | null>(null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,6 +39,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
 
   console.log("[PATHWAY-PAGE] 🔍 Raw params:", params)
   console.log("[PATHWAY-PAGE] 📞 Decoded phone number:", phoneNumber)
+  console.log("[PATHWAY-PAGE] 👤 Auth user:", user?.email)
 
   useEffect(() => {
     // Validate phone number
@@ -60,9 +69,22 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       return
     }
 
+    // ✅ Wait for auth to be ready
+    if (authLoading) {
+      console.log("[PATHWAY-PAGE] ⏳ Waiting for auth to load...")
+      return
+    }
+
+    if (!user) {
+      console.error("[PATHWAY-PAGE] ❌ No authenticated user")
+      setError("Authentication required. Please log in.")
+      setIsLoadingPathway(false)
+      return
+    }
+
     try {
       setError(null)
-      console.log("[PATHWAY-PAGE] 🔍 Fetching pathway info...")
+      console.log("[PATHWAY-PAGE] 🔍 Fetching pathway info for user:", user.email)
 
       // If pathway info is passed via URL params, use it directly
       if (searchParams?.pathwayId) {
@@ -70,31 +92,51 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
         setPathwayInfo({
           pathway_id: searchParams.pathwayId,
           pathway_name: searchParams.pathwayName || null,
+          pathway_description: null,
         })
         setIsLoadingPathway(false)
         return
       }
 
-      // Try API route first
-      console.log("[PATHWAY-PAGE] 🔄 Trying API route lookup...")
-      const apiResult = await lookupPathwayIdClientSide(phoneNumber)
+      // ✅ Make API call using the shared auth context (no manual session handling)
+      const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          // ✅ Let the browser handle cookies automatically - no manual auth headers
+        },
+        credentials: "include", // ✅ Include cookies for authentication
+      })
 
-      if (apiResult.error) {
-        console.warn("[PATHWAY-PAGE] ⚠️ API route failed, trying direct Supabase:", apiResult.error)
-        
-        // Fallback to direct Supabase query
-        const directResult = await lookupPathwayIdDirectSupabase(phoneNumber)
-        
-        if (directResult.error) {
-          console.error("[PATHWAY-PAGE] ❌ Both methods failed:", directResult.error)
-          setError(directResult.error)
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("[PATHWAY-PAGE] ❌ API error:", response.status, errorText)
+
+        if (response.status === 401) {
+          setError("Authentication failed. Please log in again.")
+        } else if (response.status === 404) {
+          console.log("[PATHWAY-PAGE] ℹ️ No existing pathway found - will create new")
+          setPathwayInfo(null) // This will trigger "Create New" mode
         } else {
-          console.log("[PATHWAY-PAGE] ✅ Direct Supabase success:", directResult)
-          setPathwayInfo(directResult)
+          setError(`API error: ${response.status} - ${errorText}`)
         }
+        setIsLoadingPathway(false)
+        return
+      }
+
+      const result = await response.json()
+      console.log("[PATHWAY-PAGE] ✅ API response:", result)
+
+      if (result.success && result.pathway_id) {
+        setPathwayInfo({
+          pathway_id: result.pathway_id,
+          pathway_name: result.pathway_name,
+          pathway_description: result.pathway_description,
+          last_deployed_at: result.last_deployed_at,
+        })
       } else {
-        console.log("[PATHWAY-PAGE] ✅ API route success:", apiResult)
-        setPathwayInfo(apiResult)
+        console.log("[PATHWAY-PAGE] ℹ️ No existing pathway found - will create new")
+        setPathwayInfo(null) // This will trigger "Create New" mode
       }
     } catch (error) {
       console.error("[PATHWAY-PAGE] ❌ Error fetching pathway info:", error)
@@ -108,7 +150,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     if (phoneNumber && phoneNumber !== "undefined") {
       fetchPathwayInfo()
     }
-  }, [phoneNumber, searchParams?.pathwayId])
+  }, [phoneNumber, searchParams?.pathwayId, user, authLoading]) // ✅ Re-run when auth state changes
 
   const handleAIGeneratorClick = () => {
     if (!phoneNumber || phoneNumber === "undefined") {
@@ -116,6 +158,31 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       return
     }
     router.push(`/dashboard/call-flows/generate?phoneNumber=${phoneNumber}`)
+  }
+
+  // ✅ Show loading state while auth is loading
+  if (authLoading) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ✅ Show auth required state
+  if (!user) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Authentication Required</h1>
+          <p className="text-gray-600 mb-4">Please log in to access the pathway editor.</p>
+          <Button onClick={() => router.push("/login")}>Go to Login</Button>
+        </div>
+      </div>
+    )
   }
 
   // Show error state for invalid phone number
@@ -139,7 +206,9 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-2xl font-bold">Pathway for {formattedNumber}</h1>
-          {pathwayInfo?.pathway_id && (
+          {isLoadingPathway ? (
+            <div className="text-sm text-gray-500">Loading pathway info...</div>
+          ) : pathwayInfo?.pathway_id ? (
             <div className="text-sm text-gray-600">
               Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}
               {pathwayInfo.last_deployed_at && (
@@ -147,6 +216,10 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
                   (Last deployed: {new Date(pathwayInfo.last_deployed_at).toLocaleDateString()})
                 </span>
               )}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500">
+              Status: <span className="font-medium text-blue-600">Will Create New Pathway</span>
             </div>
           )}
         </div>
@@ -157,7 +230,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
           </Button>
         </div>
       </div>
-      
+
       {error && (
         <div className="p-4 bg-red-50 border-b border-red-200">
           <div className="text-red-800">
@@ -165,7 +238,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
           </div>
         </div>
       )}
-      
+
       <div className="flex-1 overflow-hidden">
         <FlowchartBuilder
           phoneNumber={phoneNumber}

@@ -1,71 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
-
-export async function POST(request: NextRequest, { params }: { params: { phoneNumber: string } }) {
-  try {
-    const { phoneNumber } = params
-    const { pathwayId, pathwayName, pathwayDescription, userId, updateTimestamp } = await request.json()
-
-    if (!phoneNumber || !pathwayId || !userId) {
-      return NextResponse.json({ error: "Missing required fields: phoneNumber, pathwayId, or userId" }, { status: 400 })
-    }
-
-    console.log("🔗 [PATHWAY-LINK] Processing pathway operation:", {
-      phoneNumber,
-      pathwayId,
-      userId,
-      updateTimestamp: !!updateTimestamp,
-    })
-
-    // Prepare update data
-    const updateData: any = {
-      pathway_id: pathwayId,
-    }
-
-    // Only update these fields if not just updating timestamp
-    if (!updateTimestamp) {
-      updateData.pathway_name = pathwayName || null
-      updateData.pathway_description = pathwayDescription || null
-    }
-
-    // Always update deployment timestamp
-    updateData.last_deployed_at = new Date().toISOString()
-
-    const { data, error } = await supabase
-      .from("phone_numbers")
-      .update(updateData)
-      .eq("number", phoneNumber)
-      .eq("user_id", userId) // Ensure user can only update their own numbers
-      .select()
-
-    if (error) {
-      console.error("❌ [PATHWAY-LINK] Database error:", error)
-      return NextResponse.json({ error: "Failed to update phone number with pathway information" }, { status: 500 })
-    }
-
-    if (!data || data.length === 0) {
-      console.warn("⚠️ [PATHWAY-LINK] Phone number not found or not owned by user")
-      return NextResponse.json({ error: "Phone number not found or not owned by user" }, { status: 404 })
-    }
-
-    const message = updateTimestamp
-      ? "Deployment timestamp updated successfully"
-      : "Pathway linked to phone number successfully"
-
-    console.log("✅ [PATHWAY-LINK]", message)
-
-    return NextResponse.json({
-      success: true,
-      message,
-      data: data[0],
-    })
-  } catch (error) {
-    console.error("❌ [PATHWAY-LINK] Unexpected error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-  }
-}
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
+import type { Database } from "@/types/supabase"
 
 export async function GET(request: NextRequest, { params }: { params: { phoneNumber: string } }) {
   try {
@@ -73,29 +9,67 @@ export async function GET(request: NextRequest, { params }: { params: { phoneNum
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get("userId")
 
-    if (!phoneNumber || !userId) {
-      return NextResponse.json({ error: "Missing required parameters: phoneNumber or userId" }, { status: 400 })
+    if (!phoneNumber) {
+      return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
     }
 
-    // Get pathway information for the phone number
-    const { data, error } = await supabase
+    console.log("[PHONE-PATHWAY] 🔍 Looking up pathway for phone:", phoneNumber)
+
+    // Create Supabase client for this request
+    const supabase = createRouteHandlerClient<Database>({ cookies })
+
+    // Get the current user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      console.error("[PHONE-PATHWAY] ❌ Auth error:", userError?.message || "No user found")
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 })
+    }
+
+    // Verify user ID matches if provided
+    if (userId && user.id !== userId) {
+      console.error("[PHONE-PATHWAY] ❌ User ID mismatch")
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
+
+    console.log("[PHONE-PATHWAY] ✅ User authenticated:", user.email)
+
+    // Query for the specific phone number
+    const { data: phoneRecord, error: dbError } = await supabase
       .from("phone_numbers")
-      .select("pathway_id, pathway_name, pathway_description, last_deployed_at")
+      .select("*")
+      .eq("user_id", user.id)
       .eq("number", phoneNumber)
-      .eq("user_id", userId)
       .single()
 
-    if (error) {
-      console.error("Error fetching pathway info:", error)
-      return NextResponse.json({ error: "Failed to fetch pathway information" }, { status: 500 })
+    if (dbError) {
+      if (dbError.code === "PGRST116") {
+        // No rows returned
+        return NextResponse.json({ error: "Phone number not found" }, { status: 404 })
+      }
+      console.error("[PHONE-PATHWAY] ❌ Database error:", dbError)
+      return NextResponse.json({ error: "Database error: " + dbError.message }, { status: 500 })
     }
+
+    console.log("[PHONE-PATHWAY] ✅ Phone record found:", phoneRecord.number)
 
     return NextResponse.json({
       success: true,
-      data,
+      data: {
+        pathway_id: phoneRecord.pathway_id,
+        pathway_name: phoneRecord.pathway_name,
+        pathway_description: phoneRecord.pathway_description,
+        last_deployed_at: phoneRecord.updated_at,
+      },
     })
   } catch (error) {
-    console.error("Error in pathway fetch:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("[PHONE-PATHWAY] ❌ Unexpected error:", error)
+    return NextResponse.json(
+      { error: "Internal server error: " + (error instanceof Error ? error.message : "Unknown error") },
+      { status: 500 },
+    )
   }
 }

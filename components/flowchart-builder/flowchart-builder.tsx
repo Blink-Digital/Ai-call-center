@@ -25,20 +25,15 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { initialNodes } from "./initial-data"
-import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Copy, Play, Phone } from "lucide-react"
+import { CheckCircle2, Play, Phone } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { JsonPreview } from "./json-preview"
 import { ImportJsonDialog } from "./import-json-dialog"
-import { convertBlandFormatToFlowchart } from "./convert-bland-to-flowchart"
-import { preparePathwayForDeployment } from "./deploy-utils"
-import { ValidationDialog } from "./validation-dialog"
 import { TestPathwayDialog } from "./test-pathway-dialog"
 import { getVariableTypeByName, getVariableDescription } from "@/config/flowchart-defaults"
 import { SendTestCallDialog } from "./send-test-call-dialog"
-import { DialogFooter } from "@/components/ui/dialog"
-import { lookupPathwayIdClientSide } from "@/lib/client-pathway-lookup"
+import { useAuth } from "@/contexts/auth-context" // ✅ Use modern auth context
 
 const initialEdges: Edge[] = []
 
@@ -481,7 +476,21 @@ const edgeTypes = {
 }
 
 // Update the FlowchartBuilder component to accept initialData
-export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: string; initialData?: any }) {
+// ✅ FIXED: Changed from default export to named export
+export function FlowchartBuilder({
+  phoneNumber,
+  initialPathwayId,
+  initialPathwayName,
+  initialData,
+}: {
+  phoneNumber?: string
+  initialPathwayId?: string | null
+  initialPathwayName?: string | null
+  initialData?: any
+}) {
+  // ✅ Use modern auth context instead of manual Supabase client
+  const { user, loading: authLoading } = useAuth()
+
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState(initialData?.nodes || initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialData?.edges || initialEdges)
@@ -509,8 +518,32 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
   const [sendTestCallOpen, setSendTestCallOpen] = useState(false)
   const [selectedNodeForEdit, setSelectedNodeForEdit] = useState<any>(null)
   const [isNodeEditorOpen, setIsNodeEditorOpen] = useState(false)
-  const [existingPathwayId, setExistingPathwayId] = useState<string | null>(null)
+  const [existingPathwayId, setExistingPathwayId] = useState<string | null>(initialPathwayId || null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(false)
+
+  // ✅ Show loading state while auth is loading
+  if (authLoading) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading flowchart builder...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ✅ Show auth required state
+  if (!user) {
+    return (
+      <div className="h-full flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
+          <p className="text-gray-600">Please log in to use the flowchart builder.</p>
+        </div>
+      </div>
+    )
+  }
 
   // Load saved flowchart on component mount
   useEffect(() => {
@@ -521,13 +554,16 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
         return
       }
 
-      const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
-
-      if (phoneNumber) {
+      // Set initial pathway name from props
+      if (initialPathwayName) {
+        setPathwayName(initialPathwayName)
+      } else if (phoneNumber) {
         const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
         setPathwayName(`Pathway for ${formattedNumber}`)
         setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
       }
+
+      const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
 
       const savedFlow = localStorage.getItem(storageKey)
       if (savedFlow) {
@@ -553,7 +589,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     } catch (error) {
       console.error("Error loading flowchart:", error)
     }
-  }, [setNodes, setEdges, phoneNumber, initialData])
+  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName])
 
   // Update Bland.ai payload preview whenever nodes or edges change
   useEffect(() => {
@@ -819,6 +855,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
         body: JSON.stringify({
           apiKey,
         }),
+        credentials: "include", // ✅ Use automatic cookie-based auth
       })
 
       const data = await response.json()
@@ -858,13 +895,9 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     }
   }
 
+  // ✅ NEW: Clean deployment handler
   const handleDeploy = async () => {
-    console.log("[DEBUG] Deploy button clicked!") // Add this line
-    console.log("[DEBUG] reactFlowInstance:", reactFlowInstance) // Add this line
-    console.log("[DEBUG] pathwayName:", pathwayName) // Add this line
-
     if (!reactFlowInstance) {
-      console.log("[DEBUG] No reactFlowInstance - showing error") // Add this line
       toast({
         title: "Error",
         description: "Flowchart not ready. Please wait a moment and try again.",
@@ -874,7 +907,6 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     }
 
     if (!pathwayName.trim()) {
-      console.log("[DEBUG] No pathway name - showing error") // Add this line
       toast({
         title: "Missing pathway name",
         description: "Please provide a name for your pathway.",
@@ -883,28 +915,226 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
       return
     }
 
-    console.log("[DEBUG] Opening deployment dialog") // Add this line
-    // Open the deployment dialog instead
+    // Open the deployment dialog
     setDeployDialogOpen(true)
   }
 
-  // 🔥 FIXED: Secure API route to fetch existing pathway with proper credentials
-  const fetchExistingPathway = async () => {
+  // ✅ NEW: Simplified deployment execution
+  const executeDeployment = async () => {
+    if (!apiKey || !pathwayName) {
+      toast({
+        title: "Missing information",
+        description: "Please provide your API key and pathway name.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsDeploying(true)
+    setDeploymentResult(null)
+    setDeploymentError(null)
+    setDeployDialogOpen(false)
+
+    try {
+      // Get current flowchart data
+      const flow = reactFlowInstance.toObject()
+      flow.name = pathwayName
+      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
+
+      // Convert to Bland.ai format
+      const blandFormat = convertFlowchartToBlandFormat(flow)
+
+      // Ensure we have a start node
+      if (!blandFormat.nodes.some((node) => node.data && node.data.isStart === true)) {
+        const firstDefaultNode = blandFormat.nodes.find((node) => node.type === "Default")
+        if (firstDefaultNode) {
+          firstDefaultNode.data.isStart = true
+        } else if (blandFormat.nodes.length > 0) {
+          if (!blandFormat.nodes[0].data) blandFormat.nodes[0].data = {}
+          blandFormat.nodes[0].data.isStart = true
+        } else {
+          throw new Error("No nodes found in pathway. Cannot deploy empty pathway.")
+        }
+      }
+
+      let pathwayId = existingPathwayId
+      const isFirstTimeDeployment = !pathwayId
+
+      if (isFirstTimeDeployment) {
+        // ✅ FIRST-TIME DEPLOYMENT: Create new pathway
+        console.log("[DEPLOYMENT] 🆕 Creating new pathway...")
+
+        const createResponse = await fetch("/api/bland-ai/create-pathway", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey,
+            name: pathwayName,
+            description: pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`,
+          }),
+          credentials: "include",
+        })
+
+        const createData = await createResponse.json()
+
+        if (!createResponse.ok) {
+          throw new Error(createData.message || "Failed to create pathway")
+        }
+
+        pathwayId = createData.data?.data?.pathway_id
+        if (!pathwayId) {
+          throw new Error("No pathway ID returned from create API")
+        }
+
+        console.log("[DEPLOYMENT] ✅ New pathway created:", pathwayId)
+
+        // ✅ Save pathway ID to database
+        if (phoneNumber) {
+          await savePathwayToDatabase(pathwayId)
+          setExistingPathwayId(pathwayId) // Update state
+        }
+      }
+
+      // ✅ UPDATE PATHWAY: Send flowchart data (for both new and existing)
+      console.log("[DEPLOYMENT] 📤 Updating pathway with flowchart data...")
+
+      const updateResponse = await fetch("/api/bland-ai/update-pathway", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          apiKey,
+          pathwayId,
+          flowchart: blandFormat,
+        }),
+        credentials: "include",
+      })
+
+      const updateData = await updateResponse.json()
+
+      if (!updateResponse.ok) {
+        if (updateData.validationErrors) {
+          throw new Error("Validation errors: " + updateData.validationErrors.join(", "))
+        }
+        throw new Error(updateData.message || "Failed to update pathway")
+      }
+
+      // ✅ Update deployment timestamp
+      if (phoneNumber && !isFirstTimeDeployment) {
+        await updateDeploymentTimestamp(pathwayId)
+      }
+
+      setDeploymentResult({
+        pathwayId,
+        isFirstTimeDeployment,
+        updateResponse: updateData,
+      })
+
+      // ✅ Success toast
+      const successMessage = isFirstTimeDeployment
+        ? `✅ New pathway created with ID: ${pathwayId}`
+        : `✅ Existing pathway updated successfully: ${pathwayId}`
+
+      toast({
+        title: "Deployment successful",
+        description: successMessage,
+      })
+
+      console.log("[DEPLOYMENT] 🎉", successMessage)
+    } catch (error) {
+      console.error("[DEPLOYMENT] ❌ Error:", error)
+      setDeploymentError(error instanceof Error ? error.message : "Unknown error occurred")
+
+      toast({
+        title: "Deployment failed",
+        description: error instanceof Error ? error.message : "Unknown error occurred",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeploying(false)
+    }
+  }
+
+  // ✅ NEW: Database helper functions
+  const savePathwayToDatabase = async (pathwayId: string) => {
+    if (!phoneNumber || !user) return false
+
+    try {
+      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pathwayId,
+          pathwayName,
+          pathwayDescription,
+          userId: user.id,
+        }),
+        credentials: "include",
+      })
+
+      const result = await response.json()
+
+      if (result.success) {
+        console.log("[DATABASE] ✅ Pathway saved to database")
+        toast({
+          title: "Pathway linked",
+          description: "Phone number is now linked to this pathway",
+        })
+        return true
+      } else {
+        console.error("[DATABASE] ❌ Failed to save:", result.error)
+        return false
+      }
+    } catch (error) {
+      console.error("[DATABASE] ❌ Error saving pathway:", error)
+      return false
+    }
+  }
+
+  const updateDeploymentTimestamp = async (pathwayId: string) => {
+    if (!phoneNumber) return false
+
+    try {
+      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pathwayId,
+          pathwayName,
+          pathwayDescription,
+          updateTimestamp: true,
+        }),
+        credentials: "include",
+      })
+
+      const result = await response.json()
+      if (result.success) {
+        console.log("[DATABASE] 🕒 Deployment timestamp updated")
+      }
+      return result.success
+    } catch (error) {
+      console.error("[DATABASE] ❌ Error updating timestamp:", error)
+      return false
+    }
+  }
+
+  // ✅ NEW: Fetch existing pathway function
+  const fetchExistingPathway = async (phoneNumber: string, userId: string) => {
     if (!phoneNumber) {
       console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
       return
     }
 
-    console.log("[FLOWCHART-BUILDER] 🚀 Starting secure fetchExistingPathway...")
+    console.log("[FLOWCHART-BUILDER] 🚀 Starting fetchExistingPathway...")
     console.log("[FLOWCHART-BUILDER] Input phone number:", phoneNumber)
+    console.log("[FLOWCHART-BUILDER] User ID:", userId)
 
     setIsLoadingPathway(true)
 
     try {
-      // First try the API route approach
-      const response = await fetch(`/api/pathway-id?phone=${encodeURIComponent(phoneNumber)}`, {
+      // ✅ Use the secure API route with automatic cookie-based auth
+      const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
         method: "GET",
-        credentials: "include", // 👈 CRITICAL: Include auth cookies
+        credentials: "include", // ✅ Include cookies for authentication
         headers: {
           "Content-Type": "application/json",
         },
@@ -912,43 +1142,23 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
 
       console.log("[FLOWCHART-BUILDER] 📡 Response status:", response.status)
 
-      // If API route fails with auth error, try client-side fallback
-      if (response.status === 401) {
-        console.log("[FLOWCHART-BUILDER] ⚠️ API route auth failed, trying client-side fallback...")
-        const clientResult = await lookupPathwayIdClientSide(phoneNumber)
-
-        if (clientResult.pathway_id) {
-          console.log("[FLOWCHART-BUILDER] 🎯 CLIENT FALLBACK: Found pathway:", clientResult.pathway_id)
-          setExistingPathwayId(clientResult.pathway_id)
-
-          if (clientResult.pathway_name) {
-            setPathwayName(clientResult.pathway_name)
-          }
-
-          if (clientResult.pathway_description) {
-            setPathwayDescription(clientResult.pathway_description)
-          }
-
-          toast({
-            title: "✅ Existing pathway found",
-            description: `Loaded pathway: ${clientResult.pathway_name || clientResult.pathway_id}`,
-          })
-
-          return
-        } else {
-          console.log("[FLOWCHART-BUILDER] ❌ CLIENT FALLBACK: No pathway found")
-        }
-      }
-
-      // Continue with normal API response handling
       if (!response.ok) {
         const errorData = await response.json()
         console.error("[FLOWCHART-BUILDER] ❌ API error:", errorData.error)
-        toast({
-          title: "Error loading pathway",
-          description: errorData.error || "Failed to fetch pathway information.",
-          variant: "destructive",
-        })
+
+        if (response.status === 401) {
+          toast({
+            title: "Authentication required",
+            description: "Please log in to access pathway information.",
+            variant: "destructive",
+          })
+        } else {
+          toast({
+            title: "Error loading pathway",
+            description: errorData.error || "Failed to fetch pathway information.",
+            variant: "destructive",
+          })
+        }
         return
       }
 
@@ -978,35 +1188,6 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
       }
     } catch (error) {
       console.error("[FLOWCHART-BUILDER] ❌ Unexpected error in fetchExistingPathway:", error)
-
-      // Try client-side fallback on any error
-      console.log("[FLOWCHART-BUILDER] ⚠️ API error, trying client-side fallback...")
-      try {
-        const clientResult = await lookupPathwayIdClientSide(phoneNumber)
-
-        if (clientResult.pathway_id) {
-          console.log("[FLOWCHART-BUILDER] 🎯 CLIENT FALLBACK: Found pathway:", clientResult.pathway_id)
-          setExistingPathwayId(clientResult.pathway_id)
-
-          if (clientResult.pathway_name) {
-            setPathwayName(clientResult.pathway_name)
-          }
-
-          if (clientResult.pathway_description) {
-            setPathwayDescription(clientResult.pathway_description)
-          }
-
-          toast({
-            title: "✅ Existing pathway found",
-            description: `Loaded pathway: ${clientResult.pathway_name || clientResult.pathway_id}`,
-          })
-
-          return
-        }
-      } catch (fallbackError) {
-        console.error("[FLOWCHART-BUILDER] ❌ Client fallback also failed:", fallbackError)
-      }
-
       toast({
         title: "Error loading pathway",
         description: "Please refresh the page and try again.",
@@ -1018,327 +1199,21 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     }
   }
 
-  useEffect(() => {
-    if (phoneNumber) {
-      // Add a small delay to ensure the page is fully loaded
-      const timer = setTimeout(() => {
-        fetchExistingPathway()
-      }, 1000)
-
-      return () => clearTimeout(timer)
-    }
-  }, [phoneNumber])
-
-  // 🔍 DEBUG: Monitor existingPathwayId state changes
-  useEffect(() => {
-    console.log("[FLOWCHART-BUILDER] 🔄 existingPathwayId state changed:", existingPathwayId)
-  }, [existingPathwayId])
-
-  // 🔍 DEBUG: Monitor phoneNumber changes
-  useEffect(() => {
-    console.log("[FLOWCHART-BUILDER] 📞 phoneNumber prop changed:", phoneNumber)
-  }, [phoneNumber])
-
-  const savePathwayToDatabase = async (pathwayId: string) => {
-    if (!phoneNumber) return false
-
-    try {
-      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pathwayId,
-          pathwayName,
-          pathwayDescription,
-        }),
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        setExistingPathwayId(pathwayId)
-        console.log("[PATHWAY-SAVE] ✅ Successfully saved pathway")
-        toast({
-          title: "Pathway linked successfully",
-          description: "Phone number is now linked to this pathway",
-        })
-        return true
-      } else {
-        console.error("[PATHWAY-SAVE] ❌ Failed to save pathway:", result.error)
-        return false
-      }
-    } catch (error) {
-      console.error("Error saving pathway to database:", error)
-      return false
-    }
-  }
-
-  const handleActualDeploy = async () => {
-    console.log("[DEBUG] handleActualDeploy called") // Add this line
-    console.log("[DEBUG] apiKey:", apiKey ? "Set" : "Missing") // Add this line
-    console.log("[DEBUG] pathwayName:", pathwayName) // Add this line
-
-    if (!apiKey || !pathwayName) {
-      console.log("[DEBUG] Missing API key or pathway name") // Add this line
-      toast({
-        title: "Missing information",
-        description: "Please provide your API key and pathway name.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const flow = reactFlowInstance.toObject()
-    flow.name = pathwayName
-    flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
-
-    console.log("Preparing pathway for deployment:", flow) // Debug log
-
-    const result = preparePathwayForDeployment(flow)
-    setValidationResult(result.validationResult)
-    setShowValidationDialog(true)
-    setDeployDialogOpen(false) // Close the main dialog
-  }
-
-  const handleDeployAfterValidation = async () => {
-    console.log("Starting deployment after validation...")
-    console.log("Existing pathway ID:", existingPathwayId)
-    console.log("Phone number:", phoneNumber)
-
-    setIsDeploying(true)
-    setDeploymentResult(null)
-    setDeploymentError(null)
-    setDebugInfo(null)
-
-    try {
-      setShowValidationDialog(false)
-
-      const flow = reactFlowInstance.toObject()
-      flow.name = pathwayName
-      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
-
-      const blandFormat = convertFlowchartToBlandFormat(flow)
-
-      // Process edges for Bland.ai format
-      if (blandFormat.edges && Array.isArray(blandFormat.edges)) {
-        blandFormat.edges = blandFormat.edges.map((edge: any) => {
-          const newEdge: any = {
-            id: edge.id,
-            source: edge.source,
-            target: edge.target,
-          }
-
-          if (edge.data && edge.data.label) {
-            newEdge.label = edge.data.label
-          } else if (edge.label) {
-            newEdge.label = edge.label
-          } else {
-            const sourceNode = reactFlowInstance.getNodes().find((n: any) => n.id === edge.source)
-            if (
-              sourceNode &&
-              sourceNode.type === "customerResponseNode" &&
-              edge.sourceHandle?.startsWith("response-")
-            ) {
-              const responseIndex = Number.parseInt(edge.sourceHandle.split("-")[1], 10)
-              const options = sourceNode.data?.options || sourceNode.data?.responses || []
-              if (options.length > responseIndex) {
-                newEdge.label = options[responseIndex]
-              } else {
-                newEdge.label = "next"
-              }
-            } else {
-              newEdge.label = "next"
-            }
-          }
-
-          delete newEdge.type
-          delete newEdge.data
-          return newEdge
-        })
-      }
-
-      setApiPayload(blandFormat)
-
-      // Ensure we have a start node
-      if (!blandFormat.nodes.some((node) => node.data && node.data.isStart === true)) {
-        const firstDefaultNode = blandFormat.nodes.find((node) => node.type === "Default")
-        if (firstDefaultNode) {
-          firstDefaultNode.data.isStart = true
-        } else if (blandFormat.nodes.length > 0) {
-          if (!blandFormat.nodes[0].data) blandFormat.nodes[0].data = {}
-          blandFormat.nodes[0].data.isStart = true
-        } else {
-          throw new Error("No nodes found in pathway. Cannot deploy empty pathway.")
-        }
-      }
-
-      // CRITICAL FIX: Proper pathway ID logic
-      let pathwayId = existingPathwayId
-      let isFirstTimeDeployment = false
-
-      // Check if we have an existing pathway ID
-      if (!pathwayId) {
-        // FIRST TIME DEPLOYMENT - Create new pathway
-        console.log("[DEPLOYMENT] 🆕 No existing pathway ID - creating new pathway")
-        isFirstTimeDeployment = true
-
-        const createResponse = await fetch("/api/bland-ai/create-pathway", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            apiKey,
-            name: pathwayName,
-            description: pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`,
-          }),
-        })
-
-        const createData = await createResponse.json()
-        setDebugInfo((prev: any) => ({ ...prev, createResponse: createData }))
-
-        if (!createResponse.ok) {
-          throw new Error(createData.message || "Failed to create pathway")
-        }
-
-        pathwayId = createData.data?.data?.pathway_id
-
-        if (!pathwayId) {
-          throw new Error("No pathway ID returned from create API: " + JSON.stringify(createData))
-        }
-
-        console.log("[DEPLOYMENT] ✅ New pathway created with ID:", pathwayId)
-
-        // Save the new pathway_id to our database
-        if (phoneNumber) {
-          const saveSuccess = await savePathwayToDatabase(pathwayId)
-          if (saveSuccess) {
-            setExistingPathwayId(pathwayId) // Update state immediately
-            console.log("[DEPLOYMENT] 🔗 Pathway linked to phone number in database")
-          }
-        }
-      } else {
-        // EXISTING PATHWAY - Update existing pathway
-        console.log("[DEPLOYMENT] 🔄 Existing pathway ID found - updating pathway:", pathwayId)
-        isFirstTimeDeployment = false
-      }
-
-      // Now update the pathway with flowchart data (for both new and existing pathways)
-      console.log("[DEPLOYMENT] 📤 Sending flowchart data to pathway:", pathwayId)
-
-      const updateResponse = await fetch("/api/bland-ai/update-pathway", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          apiKey,
-          pathwayId,
-          flowchart: blandFormat,
-        }),
-      })
-
-      const rawUpdateResponse = await updateResponse.text()
-      let updateData
-
-      try {
-        updateData = JSON.parse(rawUpdateResponse)
-      } catch (e) {
-        console.error("Failed to parse update response as JSON:", rawUpdateResponse)
-        throw new Error(`Invalid response from API: ${rawUpdateResponse.substring(0, 200)}...`)
-      }
-
-      setDebugInfo((prev: any) => ({
-        ...prev,
-        updateResponse: updateData,
-        rawUpdateResponse:
-          rawUpdateResponse.length > 1000 ? rawUpdateResponse.substring(0, 1000) + "..." : rawUpdateResponse,
-      }))
-
-      if (!updateResponse.ok) {
-        if (updateData.validationErrors) {
-          const errorMessage = "Validation errors: " + updateData.validationErrors.join(", ")
-          throw new Error(errorMessage)
-        } else if (updateData.responseData) {
-          const apiErrorMessage = updateData.responseData.message || updateData.message || "Unknown API error"
-          throw new Error(`API Error: ${apiErrorMessage}`)
-        } else {
-          throw new Error(updateData.message || "Failed to update pathway")
-        }
-      }
-
-      // Update deployment timestamp in database
-      if (phoneNumber && !isFirstTimeDeployment) {
-        await updateDeploymentTimestamp(pathwayId)
-      }
-
-      setDeploymentResult({
-        createResponse: isFirstTimeDeployment ? updateData : null,
-        updateResponse: updateData,
-        pathwayId,
-        isFirstTimeDeployment,
-      })
-
-      const deploymentMessage = isFirstTimeDeployment
-        ? `✅ New pathway created and deployed with ID: ${pathwayId}`
-        : `✅ Existing pathway updated successfully: ${pathwayId}`
-
-      toast({
-        title: "Deployment successful",
-        description: deploymentMessage,
-      })
-
-      console.log("[DEPLOYMENT] 🎉 Success:", deploymentMessage)
-    } catch (error) {
-      console.error("Deployment error:", error)
-      setDeploymentError(error instanceof Error ? error.message : "Unknown error occurred")
-
-      toast({
-        title: "Deployment failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDeploying(false)
-    }
-  }
-
-  const updateDeploymentTimestamp = async (pathwayId: string) => {
-    if (!phoneNumber) return false
-
-    try {
-      const response = await fetch(`/api/phone-numbers/${phoneNumber}/pathway`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          pathwayId,
-          pathwayName,
-          pathwayDescription,
-          updateTimestamp: true,
-        }),
-      })
-
-      const result = await response.json()
-      if (result.success) {
-        console.log("[DEPLOYMENT] 🕒 Deployment timestamp updated")
-      }
-      return result.success
-    } catch (error) {
-      console.error("Error updating deployment timestamp:", error)
-      return false
-    }
-  }
-
+  // ✅ NEW: Handle import JSON function
   const handleImportJson = (jsonData: any) => {
     try {
-      const flowchartData = convertBlandFormatToFlowchart(jsonData)
+      // If we have a convertBlandFormatToFlowchart function, use it
+      // Otherwise, assume the JSON is already in flowchart format
+      let flowchartData = jsonData
 
-      setNodes(flowchartData.nodes)
-      setEdges(flowchartData.edges)
+      // Check if we need to convert from Bland format
+      if (jsonData.nodes && jsonData.edges) {
+        // Assume it's already in flowchart format
+        flowchartData = jsonData
+      }
+
+      setNodes(flowchartData.nodes || [])
+      setEdges(flowchartData.edges || [])
 
       if (flowchartData.name) setPathwayName(flowchartData.name)
       if (flowchartData.description) setPathwayDescription(flowchartData.description)
@@ -1351,7 +1226,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
 
       toast({
         title: "Import successful",
-        description: "The flowchart has been rebuilt from the imported JSON.",
+        description: "The flowchart has been imported successfully.",
       })
     } catch (error) {
       console.error("Error importing JSON:", error)
@@ -1362,6 +1237,28 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
       })
     }
   }
+
+  // ✅ Fetch pathway info when component mounts and user is authenticated
+  useEffect(() => {
+    if (phoneNumber && user && !authLoading) {
+      // Add a small delay to ensure the page is fully loaded
+      const timer = setTimeout(() => {
+        fetchExistingPathway(phoneNumber, user.id)
+      }, 1000)
+
+      return () => clearTimeout(timer)
+    }
+  }, [phoneNumber, user, authLoading])
+
+  // 🔍 DEBUG: Monitor existingPathwayId state changes
+  useEffect(() => {
+    console.log("[FLOWCHART-BUILDER] 🔄 existingPathwayId state changed:", existingPathwayId)
+  }, [existingPathwayId])
+
+  // 🔍 DEBUG: Monitor phoneNumber changes
+  useEffect(() => {
+    console.log("[FLOWCHART-BUILDER] 📞 phoneNumber prop changed:", phoneNumber)
+  }, [phoneNumber])
 
   const copyPayloadToClipboard = () => {
     if (apiPayload) {
@@ -1519,6 +1416,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
                   <div>Phone: {phoneNumber || "None"}</div>
                   <div>Pathway ID: {existingPathwayId || "None"}</div>
                   <div>API Key: {apiKey ? "Set" : "Missing"}</div>
+                  <div>User: {user?.email || "None"}</div> {/* ✅ Show current user */}
                   <div className="text-xs font-medium mt-1">
                     Status: {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
                   </div>
@@ -1598,7 +1496,6 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
 
             {connectionStatus === "error" && (
               <Alert className="col-start-2 col-span-3 bg-red-50 border-red-200 text-red-800">
-                <AlertCircle className="h-4 w-4 text-red-600" />
                 <AlertTitle>Connection Failed</AlertTitle>
                 <AlertDescription>{connectionMessage}</AlertDescription>
               </Alert>
@@ -1612,7 +1509,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
                 id="pathwayName"
                 value={pathwayName}
                 onChange={(e) => setPathwayName(e.target.value)}
-                placeholder="My Awesome Pathway"
+                placeholder="My Pathway"
                 className="col-span-3"
               />
             </div>
@@ -1620,164 +1517,25 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
               <Label htmlFor="pathwayDescription" className="text-right">
                 Description
               </Label>
-              <Textarea
+              <Input
                 id="pathwayDescription"
                 value={pathwayDescription}
                 onChange={(e) => setPathwayDescription(e.target.value)}
-                placeholder="Describe your pathway..."
+                placeholder="A description of your pathway"
                 className="col-span-3"
               />
             </div>
-
-            {existingPathwayId && (
-              <Alert className="col-start-2 col-span-3 bg-blue-50 border-blue-200 text-blue-800">
-                <AlertCircle className="h-4 w-4 text-blue-600" />
-                <AlertTitle>Updating Existing Pathway</AlertTitle>
-                <AlertDescription>
-                  This will update your existing pathway ({existingPathwayId}) instead of creating a new one.
-                </AlertDescription>
-              </Alert>
-            )}
           </div>
-
-          {deploymentError && (
-            <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-md mb-4">
-              <p className="font-semibold">Deployment Error:</p>
-              <p>{deploymentError}</p>
-            </div>
-          )}
-
-          {deploymentResult && (
-            <div className="bg-green-50 border border-green-200 rounded-md mb-4 overflow-hidden">
-              <div className="bg-green-600 text-white px-4 py-3 flex items-center">
-                <CheckCircle2 className="h-5 w-5 mr-2" />
-                <h3 className="font-medium">
-                  {deploymentResult.isFirstTimeDeployment ? "Deployment Successful!" : "Update Successful!"}
-                </h3>
-              </div>
-              <div className="p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Pathway ID:</span>
-                  <div className="flex items-center gap-2">
-                    <code className="bg-green-50 px-2 py-1 rounded text-sm">{deploymentResult.pathwayId}</code>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2"
-                      onClick={() => {
-                        navigator.clipboard.writeText(deploymentResult.pathwayId)
-                        toast({
-                          title: "Copied",
-                          description: "Pathway ID copied to clipboard",
-                        })
-                      }}
-                    >
-                      <Copy size={14} />
-                    </Button>
-                  </div>
-                </div>
-
-                {phoneNumber && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Linked Phone Number:</span>
-                    <code className="bg-green-50 px-2 py-1 rounded text-sm">{phoneNumber}</code>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setDeployDialogOpen(false)
-                      window.location.href = "/dashboard/pathway"
-                    }}
-                  >
-                    View All Pathways
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setDeployDialogOpen(false)
-                      window.location.href = "/dashboard/call-history"
-                    }}
-                  >
-                    View Call History
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {apiPayload && (
-            <div className="mt-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowDebugInfo(!showDebugInfo)}
-                className="w-full flex items-center justify-between"
-              >
-                <span>Technical Details</span>
-                {showDebugInfo ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-
-              {showDebugInfo && (
-                <div className="mt-2 space-y-4">
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <h3 className="text-sm font-medium">API Payload:</h3>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={copyPayloadToClipboard}
-                        className="flex items-center gap-1 h-7"
-                      >
-                        <Copy size={14} />
-                        Copy
-                      </Button>
-                    </div>
-                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-md overflow-auto max-h-60">
-                      <pre className="text-xs">{JSON.stringify(apiPayload, null, 2)}</pre>
-                    </div>
-                  </div>
-
-                  {debugInfo && (
-                    <div>
-                      <h3 className="text-sm font-medium mb-2">Debug Information:</h3>
-                      <div className="bg-gray-50 border border-gray-200 p-3 rounded-md overflow-auto max-h-40">
-                        <pre className="text-xs">{JSON.stringify(debugInfo, null, 2)}</pre>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter>
+          <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => setDeployDialogOpen(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={handleActualDeploy}
-              disabled={isDeploying || !apiKey || !pathwayName || connectionStatus === "error"}
-            >
-              {isDeploying ? "Deploying..." : existingPathwayId ? "Update Pathway" : "Deploy"}
+            <Button onClick={executeDeployment} disabled={!apiKey || !pathwayName || isDeploying}>
+              {isDeploying ? "Deploying..." : existingPathwayId ? "Update Pathway" : "Deploy Pathway"}
             </Button>
-          </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
-
-      {showValidationDialog && (
-        <ValidationDialog
-          isOpen={showValidationDialog}
-          onClose={() => setShowValidationDialog(false)}
-          validationResult={validationResult}
-          onProceed={handleDeployAfterValidation}
-          isDeploying={isDeploying}
-        />
-      )}
     </>
   )
 }
