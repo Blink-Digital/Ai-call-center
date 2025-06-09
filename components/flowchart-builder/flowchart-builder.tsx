@@ -890,10 +890,8 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
 
   // 🔥 FIXED: Secure API route to fetch existing pathway with proper credentials
   const fetchExistingPathway = async () => {
-    // CRITICAL: Validate phone number before any API calls
-    if (!phoneNumber || phoneNumber === "undefined" || phoneNumber === "null") {
-      console.log("[FLOWCHART-BUILDER] ❌ Invalid phone number - skipping pathway fetch:", phoneNumber)
-      setIsLoadingPathway(false)
+    if (!phoneNumber) {
+      console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
       return
     }
 
