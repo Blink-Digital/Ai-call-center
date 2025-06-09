@@ -890,8 +890,10 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
 
   // 🔥 FIXED: Secure API route to fetch existing pathway with proper credentials
   const fetchExistingPathway = async () => {
-    if (!phoneNumber) {
-      console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
+    // CRITICAL: Validate phone number before any API calls
+    if (!phoneNumber || phoneNumber === "undefined" || phoneNumber === "null") {
+      console.log("[FLOWCHART-BUILDER] ❌ Invalid phone number - skipping pathway fetch:", phoneNumber)
+      setIsLoadingPathway(false)
       return
     }
 
@@ -1309,7 +1311,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     if (!phoneNumber) return false
 
     try {
-      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
+      const response = await fetch(`/api/phone-numbers/${phoneNumber}/pathway`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1673,7 +1675,6 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
                       }}
                     >
                       <Copy size={14} />
-                      Copy
                     </Button>
                   </div>
                 </div>

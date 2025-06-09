@@ -179,7 +179,9 @@ export default function PhoneNumbersPage() {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48">
                               <DropdownMenuItem asChild>
-                                <Link href={`/dashboard/pathway/${encodeURIComponent(number.number)}`}>
+                                <Link
+                                  href={`/dashboard/pathway/${encodeURIComponent(number.number.replace(/\D/g, ""))}`}
+                                >
                                   Manage Pathway
                                 </Link>
                               </DropdownMenuItem>
