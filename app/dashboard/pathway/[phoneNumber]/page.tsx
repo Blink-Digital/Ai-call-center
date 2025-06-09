@@ -1,35 +1,33 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { FlowchartBuilder } from "@/components/flowchart-builder/flowchart-builder"
 import { formatPhoneNumber } from "@/utils/phone-utils"
-import { lookupPathwayIdClientSide } from "@/lib/client-pathway-lookup"
 
 interface PathwayEditorPageProps {
   params: {
     phoneNumber: string
   }
+  searchParams?: {
+    pathwayId?: string
+    pathwayName?: string
+  }
 }
 
-export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
+export default function PathwayEditorPage({ params, searchParams }: PathwayEditorPageProps) {
   const router = useRouter()
-  const searchParams = useSearchParams()
   const { phoneNumber } = params
-
   const [formattedNumber, setFormattedNumber] = useState<string>("")
   const [pathwayInfo, setPathwayInfo] = useState<any>(null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(true)
 
-  // Check if pathway info was passed via URL params (optimization)
-  const preloadedPathwayId = searchParams.get("pathwayId")
-  const preloadedPathwayName = searchParams.get("pathwayName")
-
   useEffect(() => {
     // Format the phone number for display
     if (phoneNumber) {
+      // Add the country code if it's not there
       const e164Number = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
       setFormattedNumber(formatPhoneNumber(e164Number))
     }
@@ -37,27 +35,35 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
 
   const fetchPathwayInfo = async () => {
     try {
-      // If pathway info was passed via URL params, use it directly (optimization)
-      if (preloadedPathwayId) {
-        console.log("[PATHWAY-PAGE] ✅ Using preloaded pathway info from URL")
+      // If pathway info is passed via URL params, use it directly
+      if (searchParams?.pathwayId) {
+        console.log("[PATHWAY-PAGE] ✅ Using pathway info from URL params")
         setPathwayInfo({
-          pathway_id: preloadedPathwayId,
-          pathway_name: preloadedPathwayName || null,
+          pathway_id: searchParams.pathwayId,
+          pathway_name: searchParams.pathwayName || null,
         })
         setIsLoadingPathway(false)
         return
       }
 
-      // Otherwise, fetch from API using the fixed lookup function
+      // Otherwise, fetch from API
       console.log("[PATHWAY-PAGE] 🔍 Fetching pathway info from API...")
 
-      const result = await lookupPathwayIdClientSide(phoneNumber)
+      const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
+        method: "GET",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
 
-      if (result.error) {
-        console.error("[PATHWAY-PAGE] ❌ Lookup error:", result.error)
-        setPathwayInfo(null)
-      } else if (result.pathway_id) {
-        console.log("[PATHWAY-PAGE] ✅ Pathway found:", result.pathway_id)
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+
+      const result = await response.json()
+
+      if (result.success && result.pathway_id) {
         setPathwayInfo({
           pathway_id: result.pathway_id,
           pathway_name: result.pathway_name,
@@ -79,7 +85,7 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
     if (phoneNumber) {
       fetchPathwayInfo()
     }
-  }, [phoneNumber, preloadedPathwayId])
+  }, [phoneNumber, searchParams?.pathwayId])
 
   const handleAIGeneratorClick = () => {
     router.push(`/dashboard/call-flows/generate?phoneNumber=${phoneNumber}`)
@@ -94,7 +100,14 @@ export default function PathwayEditorPage({ params }: PathwayEditorPageProps) {
           </Button>
           <h1 className="text-2xl font-bold">Pathway for {formattedNumber}</h1>
           {pathwayInfo?.pathway_id && (
-            <div className="text-sm text-gray-600">Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}</div>
+            <div className="text-sm text-gray-600">
+              Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}
+              {pathwayInfo.last_deployed_at && (
+                <span className="ml-2">
+                  (Last deployed: {new Date(pathwayInfo.last_deployed_at).toLocaleDateString()})
+                </span>
+              )}
+            </div>
           )}
         </div>
         <div className="flex gap-2">
