@@ -1309,7 +1309,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
     if (!phoneNumber) return false
 
     try {
-      const response = await fetch(`/api/phone-numbers/${phoneNumber}/pathway`, {
+      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -1673,6 +1673,7 @@ export function FlowchartBuilder({ phoneNumber, initialData }: { phoneNumber?: s
                       }}
                     >
                       <Copy size={14} />
+                      Copy
                     </Button>
                   </div>
                 </div>
