@@ -542,6 +542,11 @@ export function FlowchartBuilder({
     )
   }
 
+  // Sync existingPathwayId with prop changes
+  useEffect(() => {
+    setExistingPathwayId(initialPathwayId || null)
+  }, [initialPathwayId])
+
   // Load saved flowchart on component mount
   useEffect(() => {
     try {
