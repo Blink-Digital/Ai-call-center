@@ -475,6 +475,39 @@ const edgeTypes = {
   custom: CustomEdge,
 }
 
+// Move this function definition BEFORE the useEffect that uses it
+const loadFlowchartFromDatabase = useCallback(async (phoneNumber: string) => {
+  const { user } = useAuth()
+  if (!user || !phoneNumber) return null
+
+  try {
+    const response = await fetch(`/api/flowcharts?phoneNumber=${encodeURIComponent(phoneNumber)}`, {
+      method: "GET",
+      credentials: "include",
+    })
+
+    if (!response.ok) {
+      if (response.status === 404) {
+        console.log(`[LOAD] No flowchart found in database for ${phoneNumber}`)
+        return null
+      }
+      throw new Error("Failed to load flowchart from database")
+    }
+
+    const result = await response.json()
+
+    if (result.success && result.pathway?.data) {
+      console.log(`[LOAD] ✅ Loaded flowchart from database for ${phoneNumber}`)
+      return result.pathway
+    }
+
+    return null
+  } catch (error) {
+    console.error("Error loading flowchart from database:", error)
+    return null
+  }
+}, [])
+
 // ✅ FIXED: Changed from default export to named export
 export function FlowchartBuilder({
   phoneNumber,
@@ -663,7 +696,8 @@ export function FlowchartBuilder({
     }
 
     loadFlowchart()
-  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, loadFlowchartFromDatabase, searchParams])
+  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, searchParams])
+  // REMOVED: loadFlowchartFromDatabase from dependency array
 
   // ✅ FIX: Add useEffect to sync existingPathwayId when initialPathwayId changes
   useEffect(() => {
@@ -676,118 +710,6 @@ export function FlowchartBuilder({
       setIsLoadingPathway(false)
     }
   }, [initialPathwayId])
-
-  const loadFlowchartFromDatabase = useCallback(
-    async (phoneNumber: string) => {
-      if (!user || !phoneNumber) return null
-
-      try {
-        const response = await fetch(`/api/flowcharts?phoneNumber=${encodeURIComponent(phoneNumber)}`, {
-          method: "GET",
-          credentials: "include",
-        })
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            console.log(`[LOAD] No flowchart found in database for ${phoneNumber}`)
-            return null
-          }
-          throw new Error("Failed to load flowchart from database")
-        }
-
-        const result = await response.json()
-
-        if (result.success && result.pathway?.data) {
-          console.log(`[LOAD] ✅ Loaded flowchart from database for ${phoneNumber}`)
-          return result.pathway
-        }
-
-        return null
-      } catch (error) {
-        console.error("Error loading flowchart from database:", error)
-        return null
-      }
-    },
-    [user],
-  )
-
-  // Load saved flowchart on component mount
-
-  // Update Bland.ai payload preview whenever nodes or edges change
-  useEffect(() => {
-    if (reactFlowInstance) {
-      const flow = reactFlowInstance.toObject()
-      flow.name = pathwayName || "Bland.ai Pathway"
-      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
-
-      const normalizedFlow = normalizeNodeIds(flow)
-      const blandFormat = convertFlowchartToBlandFormat(normalizedFlow)
-      setBlandPayload(blandFormat)
-    }
-  }, [nodes, edges, reactFlowInstance, pathwayName, pathwayDescription])
-
-  // Effect to handle node highlighting during testing
-  useEffect(() => {
-    if (!reactFlowInstance) return
-
-    const updatedNodes = nodes.map((node) => ({
-      ...node,
-      style: {
-        ...node.style,
-        boxShadow: node.id === highlightedNodeId ? "0 0 0 2px #3b82f6" : undefined,
-        borderColor: node.id === highlightedNodeId ? "#3b82f6" : undefined,
-        borderWidth: node.id === highlightedNodeId ? "2px" : undefined,
-      },
-    }))
-
-    const hasStyleChanges = updatedNodes.some((updatedNode, index) => {
-      const currentNode = nodes[index]
-      return JSON.stringify(updatedNode.style) !== JSON.stringify(currentNode.style)
-    })
-
-    if (hasStyleChanges) {
-      setNodes(updatedNodes)
-
-      if (highlightedNodeId) {
-        const node = updatedNodes.find((n) => n.id === highlightedNodeId)
-        if (node) {
-          reactFlowInstance.setCenter(node.position.x, node.position.y, { duration: 800 })
-        }
-      }
-    }
-  }, [highlightedNodeId, reactFlowInstance, nodes, setNodes])
-
-  // Add keyboard event handler for deleting selected edges
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        (event.key === "Delete" || event.key === "Backspace") &&
-        document.activeElement?.tagName !== "INPUT" &&
-        document.activeElement?.tagName !== "TEXTAREA"
-      ) {
-        if (reactFlowInstance) {
-          const selectedEdges = edges.filter((edge) => edge.selected)
-
-          if (selectedEdges.length > 0) {
-            setEdges((edges) => edges.filter((edge) => !edge.selected))
-
-            toast({
-              title: `${selectedEdges.length > 1 ? "Connections" : "Connection"} removed`,
-              description: `${selectedEdges.length} ${selectedEdges.length > 1 ? "connections have" : "connection has"} been deleted.`,
-            })
-
-            event.preventDefault()
-          }
-        }
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [reactFlowInstance, setEdges, edges])
 
   const fetchExistingPathway = useCallback(
     async (phoneNumber: string, userId: string) => {
@@ -1686,3 +1608,6 @@ export function FlowchartBuilder({
     </>
   )
 }
+
+// At the end of the file, change from named export to default export
+export default FlowchartBuilder

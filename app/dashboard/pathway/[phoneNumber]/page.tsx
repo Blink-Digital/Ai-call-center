@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { FlowchartBuilder } from "@/components/flowchart-builder/flowchart-builder"
+import FlowchartBuilder from "@/components/flowchart-builder/flowchart-builder"
 import { formatPhoneNumber } from "@/utils/phone-utils"
 import { useAuth } from "@/contexts/auth-context"
 
