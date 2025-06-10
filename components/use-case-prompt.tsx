@@ -112,22 +112,29 @@ export default function UseCasePrompt({ phoneNumber }: UseCasePromptProps) {
           localStorage.setItem("generatedPathway", JSON.stringify(generatedPathway))
           localStorage.setItem("flowchartData", JSON.stringify(flowchartData))
 
+          // ✅ NEW: Add a timestamp to ensure this is the latest generated data
+          localStorage.setItem("lastGeneratedTimestamp", Date.now().toString())
+
           toast({
             title: "Flowchart generated",
             description: "Your flowchart has been generated and inserted into the pathway.",
           })
 
-          router.push(`/dashboard/pathway/${phoneNumber}`)
+          // ✅ IMPROVED: Use URL encoding for more reliable data transfer
+          const encodedData = encodeURIComponent(JSON.stringify(flowchartData))
+          router.push(`/dashboard/pathway/${phoneNumber}?generated=${encodedData}&timestamp=${Date.now()}`)
         } else {
           localStorage.setItem("generatedPathway", JSON.stringify(generatedPathway))
           localStorage.setItem("flowchartData", JSON.stringify(flowchartData))
+          localStorage.setItem("lastGeneratedTimestamp", Date.now().toString())
 
           toast({
             title: "Flowchart generated",
             description: "Your flowchart has been generated. Redirecting to editor...",
           })
 
-          router.push("/dashboard/call-flows/editor?source=generated")
+          const encodedData = encodeURIComponent(JSON.stringify(flowchartData))
+          router.push(`/dashboard/call-flows/editor?generated=${encodedData}&timestamp=${Date.now()}`)
         }
       } catch (conversionError) {
         console.error("Error converting API response to flowchart:", conversionError)

@@ -522,34 +522,148 @@ export function FlowchartBuilder({
 
   // ✅ NEW: Check for generated flowchart data in URL params
   useEffect(() => {
-    const generatedData = searchParams.get("generated")
-    if (generatedData) {
+    const loadFlowchart = async () => {
       try {
-        const flowchartData = JSON.parse(decodeURIComponent(generatedData))
-        console.log("[FLOWCHART-BUILDER] 🎯 Loading generated flowchart:", flowchartData)
+        // ✅ PRIORITY 1: Check for generated data in URL params first
+        const generatedData = searchParams.get("generated")
+        const generatedTimestamp = searchParams.get("timestamp")
 
-        if (flowchartData.nodes && flowchartData.edges) {
-          setNodes(flowchartData.nodes)
-          setEdges(flowchartData.edges)
+        if (generatedData) {
+          try {
+            const flowchartData = JSON.parse(decodeURIComponent(generatedData))
+            console.log("[FLOWCHART-BUILDER] 🎯 Loading generated flowchart from URL:", flowchartData)
 
-          if (flowchartData.name) setPathwayName(flowchartData.name)
-          if (flowchartData.description) setPathwayDescription(flowchartData.description)
+            if (flowchartData.nodes && flowchartData.edges) {
+              setNodes(flowchartData.nodes)
+              setEdges(flowchartData.edges)
 
-          toast({
-            title: "✨ AI Generated Flowchart Loaded",
-            description: "Your new flowchart has been generated and loaded successfully!",
-          })
+              if (flowchartData.name) setPathwayName(flowchartData.name)
+              if (flowchartData.description) setPathwayDescription(flowchartData.description)
 
-          // Clear the URL parameter after loading
-          const url = new URL(window.location.href)
-          url.searchParams.delete("generated")
-          window.history.replaceState({}, "", url.toString())
+              toast({
+                title: "✨ AI Generated Flowchart Loaded",
+                description: "Your new flowchart has been generated and loaded successfully!",
+              })
+
+              // Clear the URL parameter after loading
+              const url = new URL(window.location.href)
+              url.searchParams.delete("generated")
+              url.searchParams.delete("timestamp")
+              window.history.replaceState({}, "", url.toString())
+
+              // ✅ CRITICAL: Return early to prevent database override
+              return
+            }
+          } catch (error) {
+            console.error("[FLOWCHART-BUILDER] ❌ Error parsing generated data:", error)
+          }
+        }
+
+        // ✅ PRIORITY 2: Check localStorage for recent generation
+        const lastGeneratedTimestamp = localStorage.getItem("lastGeneratedTimestamp")
+        const generatedPathway = localStorage.getItem("generatedPathway")
+
+        if (lastGeneratedTimestamp && generatedPathway) {
+          const timeDiff = Date.now() - Number.parseInt(lastGeneratedTimestamp)
+          // If generated within last 5 minutes, prioritize it
+          if (timeDiff < 5 * 60 * 1000) {
+            try {
+              const pathway = JSON.parse(generatedPathway)
+              if (pathway.flowchartData?.nodes && pathway.flowchartData?.edges) {
+                console.log("[FLOWCHART-BUILDER] 🎯 Loading recent generated flowchart from localStorage")
+
+                setNodes(pathway.flowchartData.nodes)
+                setEdges(pathway.flowchartData.edges)
+
+                if (pathway.flowName) setPathwayName(pathway.flowName)
+
+                toast({
+                  title: "✨ Recent Generated Flowchart Loaded",
+                  description: "Loaded your recently generated flowchart.",
+                })
+
+                // Clear the generated data after loading
+                localStorage.removeItem("generatedPathway")
+                localStorage.removeItem("lastGeneratedTimestamp")
+
+                // ✅ CRITICAL: Return early to prevent database override
+                return
+              }
+            } catch (error) {
+              console.error("[FLOWCHART-BUILDER] ❌ Error parsing generated pathway:", error)
+            }
+          }
+        }
+
+        if (initialData) {
+          if (initialData.name) setPathwayName(initialData.name)
+          if (initialData.description) setPathwayDescription(initialData.description)
+          return
+        }
+
+        // Set initial pathway name from props
+        if (initialPathwayName) {
+          setPathwayName(initialPathwayName)
+        } else if (phoneNumber) {
+          const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
+          setPathwayName(`Pathway for ${formattedNumber}`)
+          setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
+        }
+
+        // ✅ PRIORITY 3: Try to load from database (only if no generated data)
+        if (phoneNumber && user) {
+          const databaseFlowchart = await loadFlowchartFromDatabase(phoneNumber)
+
+          if (databaseFlowchart?.data) {
+            const flow = databaseFlowchart.data
+            if (flow.nodes && flow.edges) {
+              setNodes(flow.nodes)
+              setEdges(flow.edges)
+
+              if (databaseFlowchart.name) setPathwayName(databaseFlowchart.name)
+              if (databaseFlowchart.description) setPathwayDescription(databaseFlowchart.description)
+
+              toast({
+                title: "Flowchart loaded",
+                description: "Loaded your saved flowchart from the cloud.",
+              })
+              return
+            }
+          }
+        }
+
+        // ✅ PRIORITY 4: Fallback to localStorage
+        const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
+        const savedFlow = localStorage.getItem(storageKey)
+
+        if (savedFlow) {
+          const flow = JSON.parse(savedFlow)
+          if (flow.nodes && flow.edges) {
+            setNodes(flow.nodes)
+            setEdges(flow.edges)
+
+            if (flow.name) setPathwayName(flow.name)
+            if (flow.description) setPathwayDescription(flow.description)
+
+            toast({
+              title: "Flowchart loaded",
+              description: "Loaded your saved flowchart from local storage.",
+            })
+          }
+        }
+
+        // Load saved API key
+        const savedApiKey = localStorage.getItem("bland-api-key")
+        if (savedApiKey) {
+          setApiKey(savedApiKey)
         }
       } catch (error) {
-        console.error("[FLOWCHART-BUILDER] ❌ Error parsing generated data:", error)
+        console.error("Error loading flowchart:", error)
       }
     }
-  }, [searchParams, setNodes, setEdges])
+
+    loadFlowchart()
+  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, loadFlowchartFromDatabase, searchParams])
 
   // ✅ FIX: Add useEffect to sync existingPathwayId when initialPathwayId changes
   useEffect(() => {
@@ -598,85 +712,6 @@ export function FlowchartBuilder({
   )
 
   // Load saved flowchart on component mount
-  useEffect(() => {
-    const loadFlowchart = async () => {
-      try {
-        // ✅ PRIORITY: Check for generated data first
-        const generatedData = searchParams.get("generated")
-        if (generatedData) {
-          // Generated data will be handled by the separate useEffect above
-          return
-        }
-
-        if (initialData) {
-          if (initialData.name) setPathwayName(initialData.name)
-          if (initialData.description) setPathwayDescription(initialData.description)
-          return
-        }
-
-        // Set initial pathway name from props
-        if (initialPathwayName) {
-          setPathwayName(initialPathwayName)
-        } else if (phoneNumber) {
-          const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
-          setPathwayName(`Pathway for ${formattedNumber}`)
-          setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
-        }
-
-        // Try to load from database first
-        if (phoneNumber && user) {
-          const databaseFlowchart = await loadFlowchartFromDatabase(phoneNumber)
-
-          if (databaseFlowchart?.data) {
-            const flow = databaseFlowchart.data
-            if (flow.nodes && flow.edges) {
-              setNodes(flow.nodes)
-              setEdges(flow.edges)
-
-              if (databaseFlowchart.name) setPathwayName(databaseFlowchart.name)
-              if (databaseFlowchart.description) setPathwayDescription(databaseFlowchart.description)
-
-              toast({
-                title: "Flowchart loaded",
-                description: "Loaded your saved flowchart from the cloud.",
-              })
-              return
-            }
-          }
-        }
-
-        // Fallback to localStorage
-        const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
-        const savedFlow = localStorage.getItem(storageKey)
-
-        if (savedFlow) {
-          const flow = JSON.parse(savedFlow)
-          if (flow.nodes && flow.edges) {
-            setNodes(flow.nodes)
-            setEdges(flow.edges)
-
-            if (flow.name) setPathwayName(flow.name)
-            if (flow.description) setPathwayDescription(flow.description)
-
-            toast({
-              title: "Flowchart loaded",
-              description: "Loaded your saved flowchart from local storage.",
-            })
-          }
-        }
-
-        // Load saved API key
-        const savedApiKey = localStorage.getItem("bland-api-key")
-        if (savedApiKey) {
-          setApiKey(savedApiKey)
-        }
-      } catch (error) {
-        console.error("Error loading flowchart:", error)
-      }
-    }
-
-    loadFlowchart()
-  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, loadFlowchartFromDatabase, searchParams])
 
   // Update Bland.ai payload preview whenever nodes or edges change
   useEffect(() => {
