@@ -39,7 +39,7 @@ interface CallHistoryClientProps {
   initialCalls?: CallRecord[]
 }
 
-export function CallHistoryClient({ initialCalls = [] }: CallHistoryClientProps) {
+function CallHistoryClient({ initialCalls = [] }: CallHistoryClientProps) {
   // ✅ Use modern auth context instead of manual Supabase client
   const { user, loading: authLoading } = useAuth()
 
@@ -391,3 +391,5 @@ export function CallHistoryClient({ initialCalls = [] }: CallHistoryClientProps)
     </div>
   )
 }
+
+export default CallHistoryClient

@@ -42,7 +42,7 @@ export default function CallHistoryTestPage() {
         </CardContent>
       </Card>
 
-      <CallHistoryClient phoneNumber={testCases.find((t) => t.id === testScenario)?.phone} />
+      <CallHistoryClient phoneNumber={testCases.find((t) => t.id === testScenario)?.phone || ""} />
     </div>
   )
 }
