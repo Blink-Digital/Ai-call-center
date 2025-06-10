@@ -1,195 +1,158 @@
 import { type NextRequest, NextResponse } from "next/server"
-
-interface BlandCall {
-  call_id: string
-  created_at: string
-  call_length: number
-  to: string
-  from: string
-  completed: boolean
-  queue_status: string
-  answered_by: string
-  batch_id?: string
-}
-
-interface BlandApiResponse {
-  count: number
-  calls: BlandCall[]
-}
+import { createServerClient } from "@supabase/ssr"
+import { cookies } from "next/headers"
 
 export async function GET(request: NextRequest) {
-  console.log("\n=== 🔍 BLAND.AI CALL HISTORY API DEBUG ===")
-
   try {
-    // Get the phone number and pagination params from query parameters
     const { searchParams } = new URL(request.url)
-    const phoneNumber = searchParams.get("phone")
-    const page = Number.parseInt(searchParams.get("page") || "1", 10)
-    const pageSize = Number.parseInt(searchParams.get("pageSize") || "100", 10) // Default to 100 instead of 3
+    const phone = searchParams.get("phone")
+    const page = Number.parseInt(searchParams.get("page") || "1")
+    const pageSize = Number.parseInt(searchParams.get("pageSize") || "20")
 
-    if (!phoneNumber) {
-      console.log("❌ [PARAMS] No phone number provided")
+    console.log("📞 [CALL-HISTORY-API] Request params:", { phone, page, pageSize })
+
+    // Create Supabase client for authentication
+    const cookieStore = cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+        },
+      },
+    )
+
+    // Get authenticated user
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      console.error("❌ [CALL-HISTORY-API] Auth error:", authError)
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
+
+    if (!phone) {
       return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
     }
 
-    console.log("📞 [INPUT] Raw phone number:", phoneNumber)
-    console.log("📄 [PAGINATION] Page:", page, "Page Size:", pageSize)
-
-    // 1️⃣ Format phone number for Bland.ai API
-    let formattedNumber = phoneNumber.trim()
-
-    // Remove all non-digit characters except +
-    const digitsOnly = formattedNumber.replace(/[^\d]/g, "")
-    console.log("🔧 [CLEAN] Digits only:", digitsOnly)
-
-    // Format as E.164
-    if (digitsOnly.length === 10) {
-      formattedNumber = `+1${digitsOnly}`
-    } else if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
-      formattedNumber = `+${digitsOnly}`
-    } else if (digitsOnly.length === 11) {
-      formattedNumber = `+1${digitsOnly}`
-    } else {
-      formattedNumber = `+${digitsOnly}`
+    if (!process.env.BLAND_AI_API_KEY) {
+      console.error("❌ [CALL-HISTORY-API] Missing BLAND_AI_API_KEY")
+      return NextResponse.json({ error: "Bland AI API key not configured" }, { status: 500 })
     }
 
-    console.log("✅ [FORMATTED] Final number:", formattedNumber)
+    // Clean phone number (remove +1 prefix if present for Bland.ai API)
+    const cleanPhone = phone.replace(/^\+?1?/, "").replace(/\D/g, "")
+    console.log("📞 [CALL-HISTORY-API] Clean phone:", cleanPhone)
 
-    // 2️⃣ Check API key
-    const blandApiKey = process.env.BLAND_AI_API_KEY
-    if (!blandApiKey) {
-      console.log("❌ [API KEY] Not configured")
-      return NextResponse.json({ error: "Bland.ai API key not configured" }, { status: 500 })
+    // Fetch calls from Bland.ai API
+    const blandResponse = await fetch("https://api.bland.ai/v1/calls", {
+      method: "GET",
+      headers: {
+        Authorization: process.env.BLAND_AI_API_KEY,
+        "Content-Type": "application/json",
+      },
+    })
+
+    if (!blandResponse.ok) {
+      const errorText = await blandResponse.text()
+      console.error("❌ [CALL-HISTORY-API] Bland.ai API error:", blandResponse.status, errorText)
+      return NextResponse.json(
+        {
+          error: `Bland.ai API error: ${blandResponse.status}`,
+          details: errorText,
+        },
+        { status: blandResponse.status },
+      )
     }
 
-    console.log("✅ [API KEY] Configured")
+    const blandData = await blandResponse.json()
+    console.log("✅ [CALL-HISTORY-API] Bland.ai response:", {
+      totalCalls: blandData.calls?.length || 0,
+      sampleCall: blandData.calls?.[0]
+        ? {
+            id: blandData.calls[0].c_id,
+            to: blandData.calls[0].to,
+            from: blandData.calls[0].from,
+            status: blandData.calls[0].status,
+            created_at: blandData.calls[0].created_at,
+          }
+        : null,
+    })
 
-    // 3️⃣ Try multiple API endpoints to find calls
-    const endpoints = [
-      // Try with to_number (calls TO this number)
-      `https://api.bland.ai/v1/calls?to_number=${encodeURIComponent(formattedNumber)}&limit=${pageSize}`,
-      // Try with from_number (calls FROM this number)
-      `https://api.bland.ai/v1/calls?from_number=${encodeURIComponent(formattedNumber)}&limit=${pageSize}`,
-      // Try without specific number filter (get all calls)
-      `https://api.bland.ai/v1/calls?limit=${pageSize}`,
-    ]
+    // Filter calls for the specific phone number
+    const allCalls = blandData.calls || []
+    const filteredCalls = allCalls.filter((call: any) => {
+      const callTo = call.to?.replace(/^\+?1?/, "").replace(/\D/g, "")
+      const callFrom = call.from?.replace(/^\+?1?/, "").replace(/\D/g, "")
+      return callTo === cleanPhone || callFrom === cleanPhone
+    })
 
-    let allCalls: BlandCall[] = []
-    let totalCount = 0
+    console.log("📞 [CALL-HISTORY-API] Filtered calls:", {
+      total: allCalls.length,
+      filtered: filteredCalls.length,
+      phone: cleanPhone,
+    })
 
-    for (let i = 0; i < endpoints.length; i++) {
-      const apiUrl = endpoints[i]
-      console.log(`\n--- ATTEMPT ${i + 1}: ${i === 0 ? "TO_NUMBER" : i === 1 ? "FROM_NUMBER" : "ALL_CALLS"} ---`)
-      console.log("🌐 [API URL]", apiUrl)
+    // Transform calls to match our expected format
+    const transformedCalls = filteredCalls.map((call: any) => ({
+      id: call.c_id || call.call_id || call.id,
+      to_number: call.to || "",
+      from_number: call.from || "",
+      status: call.status || "unknown",
+      duration: call.call_length || call.duration || 0,
+      start_time: call.created_at || call.start_time || new Date().toISOString(),
+      pathway_id: call.pathway_id || null,
+      pathway_name: call.pathway_name || null,
+      ended_reason: call.ended_reason || null,
+      recording_url: call.recording_url || null,
+      transcript: call.transcript || null,
+      summary: call.summary || null,
+      variables: call.variables || null,
+    }))
 
-      try {
-        const blandResponse = await fetch(apiUrl, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${blandApiKey}`,
-            "Content-Type": "application/json",
-          },
-        })
+    // Sort by start_time (newest first)
+    transformedCalls.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime())
 
-        console.log("📡 [RESPONSE] Status:", blandResponse.status)
+    // Apply pagination
+    const totalCalls = transformedCalls.length
+    const totalPages = Math.ceil(totalCalls / pageSize)
+    const startIndex = (page - 1) * pageSize
+    const endIndex = startIndex + pageSize
+    const paginatedCalls = transformedCalls.slice(startIndex, endIndex)
 
-        if (!blandResponse.ok) {
-          const errorText = await blandResponse.text()
-          console.log("❌ [API ERROR]", errorText)
-          continue
-        }
-
-        const rawResponseText = await blandResponse.text()
-        console.log("📄 [RAW RESPONSE] Length:", rawResponseText.length)
-
-        let blandData: BlandApiResponse
-        try {
-          blandData = JSON.parse(rawResponseText)
-        } catch (jsonError) {
-          console.log("❌ [JSON PARSE] Failed:", jsonError)
-          continue
-        }
-
-        console.log("✅ [PARSED] Found", blandData.calls?.length || 0, "calls")
-
-        if (blandData.calls && blandData.calls.length > 0) {
-          // Filter calls that match our phone number (either to or from)
-          const matchingCalls = blandData.calls.filter((call) => {
-            const callTo = call.to?.replace(/[^\d]/g, "")
-            const callFrom = call.from?.replace(/[^\d]/g, "")
-            const targetDigits = digitsOnly
-
-            const toMatches = callTo === targetDigits || callTo === targetDigits.substring(1)
-            const fromMatches = callFrom === targetDigits || callFrom === targetDigits.substring(1)
-
-            if (toMatches || fromMatches) {
-              console.log("🎯 [MATCH] Call:", call.call_id, "TO:", call.to, "FROM:", call.from)
-            }
-
-            return toMatches || fromMatches
-          })
-
-          allCalls = [...allCalls, ...matchingCalls]
-          totalCount += matchingCalls.length
-
-          console.log("📊 [FILTERED] Matching calls:", matchingCalls.length)
-        }
-
-        // If we found calls in the first attempt, we can stop
-        if (i === 0 && allCalls.length > 0) {
-          break
-        }
-      } catch (fetchError) {
-        console.log("💥 [FETCH ERROR]", fetchError)
-        continue
-      }
-    }
-
-    // 4️⃣ Remove duplicates based on call_id
-    const uniqueCalls = allCalls.filter(
-      (call, index, self) => index === self.findIndex((c) => c.call_id === call.call_id),
-    )
-
-    console.log("\n=== 📊 FINAL RESULTS ===")
-    console.log("🎯 [TOTAL UNIQUE CALLS]", uniqueCalls.length)
-    console.log("📞 [PHONE NUMBER]", formattedNumber)
-
-    if (uniqueCalls.length > 0) {
-      console.log("✅ [SUCCESS] Call history found!")
-      uniqueCalls.forEach((call, i) => {
-        console.log(
-          `📞 [CALL ${i + 1}] ID: ${call.call_id}, TO: ${call.to}, FROM: ${call.from}, DATE: ${call.created_at}`,
-        )
-      })
-    } else {
-      console.log("❌ [NO CALLS] No matching calls found")
-    }
-
-    console.log("=== END DEBUG ===\n")
+    console.log("✅ [CALL-HISTORY-API] Response:", {
+      totalCalls,
+      totalPages,
+      currentPage: page,
+      pageSize,
+      returnedCalls: paginatedCalls.length,
+    })
 
     return NextResponse.json({
-      count: uniqueCalls.length,
-      calls: uniqueCalls,
-      phone_number: phoneNumber,
-      formatted_number: formattedNumber,
+      success: true,
+      calls: paginatedCalls,
+      count: totalCalls,
       page,
       pageSize,
-      totalPages: Math.ceil(uniqueCalls.length / pageSize),
+      totalPages,
       debug_info: {
-        endpoints_tried: endpoints.length,
-        total_calls_found: allCalls.length,
-        unique_calls: uniqueCalls.length,
-        search_digits: digitsOnly,
+        phone_searched: cleanPhone,
+        total_bland_calls: allCalls.length,
+        filtered_calls: filteredCalls.length,
+        sample_call_fields: allCalls[0] ? Object.keys(allCalls[0]) : [],
       },
     })
   } catch (error) {
-    console.log("💥 [UNEXPECTED ERROR]", error)
+    console.error("💥 [CALL-HISTORY-API] Unexpected error:", error)
     return NextResponse.json(
       {
-        count: 0,
-        calls: [],
         error: "Internal server error",
-        message: error instanceof Error ? error.message : "Unknown error",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
       { status: 500 },
     )

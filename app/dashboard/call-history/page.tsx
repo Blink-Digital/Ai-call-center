@@ -22,13 +22,25 @@ export default function CallHistoryPage() {
   const paginatedCalls = calls.slice(startIndex, endIndex)
 
   const formatDuration = (duration: number) => {
+    if (!duration || isNaN(duration)) {
+      return "0:00"
+    }
     const minutes = Math.floor(duration / 60)
     const seconds = Math.floor(duration % 60)
     return `${minutes}:${seconds.toString().padStart(2, "0")}`
   }
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString()
+    try {
+      const date = new Date(dateString)
+      // Check if date is valid
+      if (isNaN(date.getTime())) {
+        return "Invalid Date"
+      }
+      return date.toLocaleString()
+    } catch (error) {
+      return "Invalid Date"
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -151,8 +163,8 @@ export default function CallHistoryPage() {
                   <TableBody>
                     {paginatedCalls.map((call) => (
                       <TableRow key={call.id} className="hover:bg-gray-50">
-                        <TableCell className="font-medium">{call.from_number}</TableCell>
-                        <TableCell>{call.to_number}</TableCell>
+                        <TableCell className="font-medium">{call.from_number || "—"}</TableCell>
+                        <TableCell>{call.to_number || "—"}</TableCell>
                         <TableCell className="text-gray-600">{formatDate(call.start_time)}</TableCell>
                         <TableCell className="font-mono text-sm">{formatDuration(call.duration)}</TableCell>
                         <TableCell>
