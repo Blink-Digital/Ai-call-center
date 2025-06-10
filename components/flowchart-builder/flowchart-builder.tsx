@@ -35,6 +35,7 @@ import { getVariableTypeByName, getVariableDescription } from "@/config/flowchar
 import { SendTestCallDialog } from "./send-test-call-dialog"
 import { useAuth } from "@/contexts/auth-context"
 import { saveFlowchart as saveFlowchartUtil } from "@/utils/save-flowchart"
+import { useSearchParams } from "next/navigation"
 
 const initialEdges: Edge[] = []
 
@@ -488,6 +489,7 @@ export function FlowchartBuilder({
 }) {
   // ✅ FIXED: Move all hooks to the top and ensure they're always called
   const { user, loading: authLoading } = useAuth()
+  const searchParams = useSearchParams()
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const [nodes, setNodes, onNodesChange] = useNodesState(initialData?.nodes || initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialData?.edges || initialEdges)
@@ -517,6 +519,37 @@ export function FlowchartBuilder({
   const [isNodeEditorOpen, setIsNodeEditorOpen] = useState(false)
   const [existingPathwayId, setExistingPathwayId] = useState<string | null>(initialPathwayId || null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(false)
+
+  // ✅ NEW: Check for generated flowchart data in URL params
+  useEffect(() => {
+    const generatedData = searchParams.get("generated")
+    if (generatedData) {
+      try {
+        const flowchartData = JSON.parse(decodeURIComponent(generatedData))
+        console.log("[FLOWCHART-BUILDER] 🎯 Loading generated flowchart:", flowchartData)
+
+        if (flowchartData.nodes && flowchartData.edges) {
+          setNodes(flowchartData.nodes)
+          setEdges(flowchartData.edges)
+
+          if (flowchartData.name) setPathwayName(flowchartData.name)
+          if (flowchartData.description) setPathwayDescription(flowchartData.description)
+
+          toast({
+            title: "✨ AI Generated Flowchart Loaded",
+            description: "Your new flowchart has been generated and loaded successfully!",
+          })
+
+          // Clear the URL parameter after loading
+          const url = new URL(window.location.href)
+          url.searchParams.delete("generated")
+          window.history.replaceState({}, "", url.toString())
+        }
+      } catch (error) {
+        console.error("[FLOWCHART-BUILDER] ❌ Error parsing generated data:", error)
+      }
+    }
+  }, [searchParams, setNodes, setEdges])
 
   // ✅ FIX: Add useEffect to sync existingPathwayId when initialPathwayId changes
   useEffect(() => {
@@ -568,6 +601,13 @@ export function FlowchartBuilder({
   useEffect(() => {
     const loadFlowchart = async () => {
       try {
+        // ✅ PRIORITY: Check for generated data first
+        const generatedData = searchParams.get("generated")
+        if (generatedData) {
+          // Generated data will be handled by the separate useEffect above
+          return
+        }
+
         if (initialData) {
           if (initialData.name) setPathwayName(initialData.name)
           if (initialData.description) setPathwayDescription(initialData.description)
@@ -636,7 +676,7 @@ export function FlowchartBuilder({
     }
 
     loadFlowchart()
-  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, loadFlowchartFromDatabase])
+  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user, loadFlowchartFromDatabase, searchParams])
 
   // Update Bland.ai payload preview whenever nodes or edges change
   useEffect(() => {
