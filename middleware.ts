@@ -10,17 +10,18 @@ export async function middleware(req: NextRequest) {
   // Create Supabase client bound to the current request/response
   const supabase = createMiddlewareClient<Database>({ req, res })
 
-  // Attempt to get the current session
+  // Get the current user (this is more reliable than getSession in middleware)
   const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    data: { user },
+    error,
+  } = await supabase.auth.getUser()
 
   const pathname = req.nextUrl.pathname
 
-  console.log(`[MIDDLEWARE] ${pathname} - Session: ${session ? "✅" : "❌"}`)
+  console.log(`[MIDDLEWARE] ${pathname} - User: ${user ? "✅" : "❌"} ${user?.email || ""}`)
 
   // Redirect unauthenticated users away from protected dashboard routes
-  if (!session && pathname.startsWith("/dashboard")) {
+  if (!user && pathname.startsWith("/dashboard")) {
     console.log(`🔒 [MIDDLEWARE] No auth, redirecting ${pathname} → /login`)
     const loginUrl = new URL("/login", req.url)
     loginUrl.searchParams.set("redirect", pathname)
@@ -28,7 +29,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // Redirect logged-in users away from auth pages
-  if (session && (pathname === "/login" || pathname === "/signup")) {
+  if (user && (pathname === "/login" || pathname === "/signup")) {
     console.log(`🔄 [MIDDLEWARE] Authenticated user on ${pathname}, redirecting to /dashboard`)
     return NextResponse.redirect(new URL("/dashboard", req.url))
   }
