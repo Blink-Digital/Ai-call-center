@@ -518,6 +518,18 @@ export function FlowchartBuilder({
   const [existingPathwayId, setExistingPathwayId] = useState<string | null>(initialPathwayId || null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(false)
 
+  // ✅ FIX: Add useEffect to sync existingPathwayId when initialPathwayId changes
+  useEffect(() => {
+    console.log("[FLOWCHART-BUILDER] 🔄 initialPathwayId prop changed:", initialPathwayId)
+
+    if (initialPathwayId) {
+      console.log("[FLOWCHART-BUILDER] ✅ Updating existingPathwayId state to:", initialPathwayId)
+      setExistingPathwayId(initialPathwayId)
+      // ✅ CRITICAL FIX: Stop loading when pathway ID is set
+      setIsLoadingPathway(false)
+    }
+  }, [initialPathwayId])
+
   // ✅ Show loading state while auth is loading
   if (authLoading) {
     return (
@@ -1121,87 +1133,90 @@ export function FlowchartBuilder({
   }
 
   // ✅ FIXED: Fetch existing pathway function with better error handling
-  const fetchExistingPathway = async (phoneNumber: string, userId: string) => {
-    if (!phoneNumber) {
-      console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
-      return
-    }
-
-    console.log("[FLOWCHART-BUILDER] 🚀 Starting fetchExistingPathway...")
-    console.log("[FLOWCHART-BUILDER] Input phone number:", phoneNumber)
-    console.log("[FLOWCHART-BUILDER] User ID:", userId)
-
-    setIsLoadingPathway(true)
-
-    try {
-      // ✅ FIXED: Use the correct parameter name 'phone' instead of 'phoneNumber'
-      const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
-        method: "GET",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      console.log("[FLOWCHART-BUILDER] 📡 Response status:", response.status)
-
-      if (!response.ok) {
-        // ✅ SILENT HANDLING: Don't show error toasts for auth failures
-        if (response.status === 401) {
-          console.warn("[FLOWCHART-BUILDER] ⚠️ Authentication failed - user may need to refresh")
-          // Don't show error toast, just log it
-          return
-        }
-
-        const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }))
-        console.error("[FLOWCHART-BUILDER] ❌ API error:", errorData.error)
-
-        // Only show toast for non-auth errors
-        if (response.status !== 401) {
-          toast({
-            title: "Error loading pathway",
-            description: errorData.error || "Failed to fetch pathway information.",
-            variant: "destructive",
-          })
-        }
+  const fetchExistingPathway = useCallback(
+    async (phoneNumber: string, userId: string) => {
+      if (!phoneNumber) {
+        console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
         return
       }
 
-      const data = await response.json()
-      console.log("[FLOWCHART-BUILDER] 📊 API response:", data)
+      console.log("[FLOWCHART-BUILDER] 🚀 Starting fetchExistingPathway...")
+      console.log("[FLOWCHART-BUILDER] Input phone number:", phoneNumber)
+      console.log("[FLOWCHART-BUILDER] User ID:", userId)
 
-      if (data.success && data.pathway_id) {
-        console.log("[FLOWCHART-BUILDER] 🎯 EXISTING PATHWAY FOUND:", data.pathway_id)
-        setExistingPathwayId(data.pathway_id)
+      setIsLoadingPathway(true)
 
-        if (data.pathway_name) {
-          console.log("[FLOWCHART-BUILDER] 📝 Setting pathway name:", data.pathway_name)
-          setPathwayName(data.pathway_name)
-        }
-
-        if (data.pathway_description) {
-          console.log("[FLOWCHART-BUILDER] 📝 Setting pathway description:", data.pathway_description)
-          setPathwayDescription(data.pathway_description)
-        }
-
-        // ✅ Only show success toast if we actually found a pathway
-        toast({
-          title: "✅ Existing pathway found",
-          description: `Loaded pathway: ${data.pathway_name || data.pathway_id}`,
+      try {
+        // ✅ FIXED: Use the correct parameter name 'phone' instead of 'phoneNumber'
+        const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
+          method: "GET",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
         })
-      } else {
-        console.log("[FLOWCHART-BUILDER] ❌ No existing pathway found for this phone number")
-        // Don't show error toast for this case - it's normal for new pathways
+
+        console.log("[FLOWCHART-BUILDER] 📡 Response status:", response.status)
+
+        if (!response.ok) {
+          // ✅ SILENT HANDLING: Don't show error toasts for auth failures
+          if (response.status === 401) {
+            console.warn("[FLOWCHART-BUILDER] ⚠️ Authentication failed - user may need to refresh")
+            // Don't show error toast, just log it
+            return
+          }
+
+          const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }))
+          console.error("[FLOWCHART-BUILDER] ❌ API error:", errorData.error)
+
+          // Only show toast for non-auth errors
+          if (response.status !== 401) {
+            toast({
+              title: "Error loading pathway",
+              description: errorData.error || "Failed to fetch pathway information.",
+              variant: "destructive",
+            })
+          }
+          return
+        }
+
+        const data = await response.json()
+        console.log("[FLOWCHART-BUILDER] 📊 API response:", data)
+
+        if (data.success && data.pathway_id) {
+          console.log("[FLOWCHART-BUILDER] 🎯 EXISTING PATHWAY FOUND:", data.pathway_id)
+          setExistingPathwayId(data.pathway_id)
+
+          if (data.pathway_name) {
+            console.log("[FLOWCHART-BUILDER] 📝 Setting pathway name:", data.pathway_name)
+            setPathwayName(data.pathway_name)
+          }
+
+          if (data.pathway_description) {
+            console.log("[FLOWCHART-BUILDER] 📝 Setting pathway description:", data.pathway_description)
+            setPathwayDescription(data.pathway_description)
+          }
+
+          // ✅ Only show success toast if we actually found a pathway
+          toast({
+            title: "✅ Existing pathway found",
+            description: `Loaded pathway: ${data.pathway_name || data.pathway_id}`,
+          })
+        } else {
+          console.log("[FLOWCHART-BUILDER] ❌ No existing pathway found for this phone number")
+          // Don't show error toast for this case - it's normal for new pathways
+        }
+      } catch (error) {
+        console.error("[FLOWCHART-BUILDER] ❌ Unexpected error in fetchExistingPathway:", error)
+        // ✅ SILENT HANDLING: Don't show error toast for network errors
+        // The user can still use the flowchart builder even if pathway lookup fails
+      } finally {
+        setIsLoadingPathway(false)
+        console.log("[FLOWCHART-BUILDER] 🏁 fetchExistingPathway completed")
       }
-    } catch (error) {
-      console.error("[FLOWCHART-BUILDER] ❌ Unexpected error in fetchExistingPathway:", error)
-      // ✅ SILENT HANDLING: Don't show error toast for network errors
-      // The user can still use the flowchart builder even if pathway lookup fails
-    } finally {
-      setIsLoadingPathway(false)
-      console.log("[FLOWCHART-BUILDER] 🏁 fetchExistingPathway completed")
-    }
-  }
+    },
+    [setExistingPathwayId, setPathwayName, setPathwayDescription, setIsLoadingPathway],
+  )
 
   // ✅ NEW: Handle import JSON function
   const handleImportJson = (jsonData: any) => {
@@ -1424,6 +1439,7 @@ export function FlowchartBuilder({
                   <div className="text-xs font-medium mt-1">
                     Status: {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
                   </div>
+                  {/* ✅ FIXED: Only show loading when actually loading */}
                   {isLoadingPathway && <div className="text-xs text-blue-600 mt-1">🔍 Loading pathway...</div>}
                 </div>
               </Panel>
