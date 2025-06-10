@@ -92,11 +92,11 @@ export function NodeSidebar() {
     <>
       {/* Mobile overlay when sidebar is open */}
       {isExpanded && isMobile && (
-        <div className="fixed inset-0 bg-black/30 z-40 md:hidden" onClick={() => setCollapsed(true)} />
+        <div className="fixed inset-0 bg-black/30 z-20 md:hidden" onClick={() => setCollapsed(true)} />
       )}
 
       <motion.div
-        className="fixed md:relative z-50 h-full bg-white border-r border-gray-200 shadow-lg flex flex-col group"
+        className="fixed md:relative z-30 h-full bg-white border-r border-gray-200 shadow-lg flex flex-col group"
         animate={{
           width: isExpanded ? "16rem" : isMobile ? "0" : "4rem",
           x: collapsed && isMobile ? "-100%" : 0,
@@ -291,7 +291,7 @@ export function NodeSidebar() {
           variant="outline"
           size="icon"
           onClick={() => setCollapsed(false)}
-          className="fixed top-4 left-4 z-50 rounded-full shadow-md bg-white"
+          className="fixed top-4 left-4 z-30 rounded-full shadow-md bg-white"
         >
           <PanelLeft className="h-5 w-5" />
         </Button>
