@@ -156,9 +156,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, message: error.message }
       }
 
-      if (!data.user) {
+      if (!data.user || !data.session) {
         return { success: false, message: "Login failed - no user data received" }
       }
+
+      // ✅ CRITICAL FIX: Set session in cookies for middleware compatibility
+      console.log("🔄 Setting session in cookies for middleware...")
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      })
 
       console.log("✅ Login successful, user:", data.user.id)
       // ✅ Let middleware handle redirects, don't redirect here
