@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react"
 import { useSupabaseBrowser } from "@/lib/supabase-browser"
+import { useRouter } from "next/navigation"
 
 export interface User {
   id: string
@@ -38,8 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAuthenticated = !!user
   const initializedRef = useRef(false)
   const supabase = useSupabaseBrowser()
+  const router = useRouter()
 
-  // ✅ Stable session refresh without router interference
+  // ✅ Simple session refresh without complex sync
   const refreshSession = async () => {
     try {
       console.log("🔄 [AUTH-CONTEXT] Refreshing session...")
@@ -79,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // ✅ Single initialization effect with better session handling
+  // ✅ Single initialization effect
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -89,7 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session check
     refreshSession()
 
-    // ✅ Set up auth state listener with proper session confirmation
+    // ✅ Set up auth state listener
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -104,15 +106,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         setLoading(false)
 
-        // ✅ CRITICAL: Force a page refresh to ensure middleware sees the new session
-        console.log("🔄 [AUTH-CONTEXT] Forcing page refresh to sync middleware...")
-        window.location.href = "/dashboard"
+        // ✅ Simple redirect after successful login
+        console.log("🔄 [AUTH-CONTEXT] Redirecting to dashboard...")
+        router.push("/dashboard")
       } else if (event === "SIGNED_OUT") {
         console.log("🔄 [AUTH-CONTEXT] User signed out, clearing context...")
         setUser(null)
         setLoading(false)
+        router.push("/login")
       } else if (event === "INITIAL_SESSION") {
-        // ✅ Handle initial session load properly
         if (session?.user) {
           console.log("✅ [AUTH-CONTEXT] Initial session confirmed:", session.user.id)
           setUser({
@@ -126,7 +128,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         setLoading(false)
       } else if (event === "TOKEN_REFRESHED") {
-        // ✅ Handle token refresh without re-triggering data fetches
         console.log("🔄 [AUTH-CONTEXT] Token refreshed, session still valid")
         if (session?.user && !user) {
           setUser({
@@ -143,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       subscription.unsubscribe()
       initializedRef.current = false
     }
-  }, [supabase]) // ✅ Only depend on supabase client
+  }, [supabase, router])
 
   const login = async (email: string, password: string) => {
     try {
@@ -165,7 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log("✅ [AUTH-CONTEXT] Login successful, user:", data.user.id)
 
-      // ✅ The onAuthStateChange handler will trigger and handle the redirect
+      // ✅ Let the auth state change handler handle the redirect
       return { success: true, message: "Login successful" }
     } catch (error: any) {
       console.error("❌ [AUTH-CONTEXT] Unexpected login error:", error)
@@ -208,12 +209,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Error signing out:", error)
       }
       setUser(null)
-      // ✅ Force redirect to login
-      window.location.href = "/login"
     } catch (err) {
       console.error("Logout error:", err)
       setUser(null)
-      window.location.href = "/login"
     }
   }
 

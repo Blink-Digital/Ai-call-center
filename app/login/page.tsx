@@ -3,7 +3,6 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/contexts/auth-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,21 +18,14 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState("")
   const { login, loading: authLoading, isAuthenticated } = useAuth()
-  const router = useRouter()
 
-  // ✅ Fallback redirect if middleware doesn't catch it
+  // ✅ Simple redirect check - no complex logic
   useEffect(() => {
     if (isAuthenticated && !authLoading) {
-      console.log("🔄 [LOGIN-PAGE] User authenticated, attempting redirect...")
-      // Give middleware a chance to redirect first, then fallback to client-side
-      const timer = setTimeout(() => {
-        console.log("🔄 [LOGIN-PAGE] Fallback redirect to dashboard")
-        router.push("/dashboard")
-      }, 1000)
-
-      return () => clearTimeout(timer)
+      console.log("🔄 [LOGIN-PAGE] User already authenticated")
+      // Let the auth context handle the redirect
     }
-  }, [isAuthenticated, authLoading, router])
+  }, [isAuthenticated, authLoading])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -60,18 +52,6 @@ export default function LoginPage() {
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
           <p>Loading...</p>
-        </div>
-      </div>
-    )
-  }
-
-  // ✅ Show redirecting state if authenticated
-  if (isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-          <p>Redirecting to dashboard...</p>
         </div>
       </div>
     )
