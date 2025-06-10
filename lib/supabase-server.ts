@@ -27,6 +27,3 @@ export async function getServerUser() {
     return null
   }
 }
-
-// Add this export for backward compatibility
-export { createSupabaseServer as createServerClient }
