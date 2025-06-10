@@ -1,24 +1,34 @@
 import { type NextRequest, NextResponse } from "next/server"
+import { createClient } from "@/lib/supabase-server"
+
+export const dynamic = "force-dynamic"
 
 export async function GET(request: NextRequest) {
+  console.log("🔄 [PROXY-CALLS] Processing GET request")
+
   try {
-    const { searchParams } = new URL(request.url)
+    // Get query parameters
+    const searchParams = request.nextUrl.searchParams
     const toNumber = searchParams.get("to_number")
     const fromNumber = searchParams.get("from_number")
     const page = searchParams.get("page") || "1"
-    const limit = searchParams.get("limit") || "100"
+    const limit = searchParams.get("limit") || "10"
 
-    console.log("🔍 Bland.ai proxy calls - Request params:", { toNumber, fromNumber, page, limit })
+    console.log(`📞 [PROXY-CALLS] Filtering by to_number: ${toNumber || "none"}`)
+    console.log(`📞 [PROXY-CALLS] Filtering by from_number: ${fromNumber || "none"}`)
+    console.log(`📄 [PROXY-CALLS] Page: ${page}, Limit: ${limit}`)
 
-    if (!process.env.BLAND_AI_API_KEY) {
-      console.error("❌ BLAND_AI_API_KEY not found")
-      return NextResponse.json({ error: "API key not configured" }, { status: 500 })
+    // Validate API key
+    const apiKey = process.env.BLAND_AI_API_KEY
+    if (!apiKey) {
+      console.error("❌ [PROXY-CALLS] Missing BLAND_AI_API_KEY")
+      return NextResponse.json({ error: "Server configuration error: Missing API key" }, { status: 500 })
     }
 
-    // Build the Bland.ai API URL
+    // Build URL with pagination and filtering
     const blandUrl = new URL("https://api.bland.ai/v1/calls")
-
-    // Support both to_number and from_number filtering
+    blandUrl.searchParams.set("page", page)
+    blandUrl.searchParams.set("limit", limit)
     if (toNumber) {
       blandUrl.searchParams.set("to_number", toNumber)
     }
@@ -26,48 +36,24 @@ export async function GET(request: NextRequest) {
       blandUrl.searchParams.set("from_number", fromNumber)
     }
 
-    blandUrl.searchParams.set("limit", limit)
-    // Note: Bland.ai uses 'from' and 'to' for pagination, not 'page'
-    // We'll handle pagination differently if needed
+    console.log(`🔗 [PROXY-CALLS] Requesting: ${blandUrl.toString()}`)
 
-    console.log("🌐 Making request to Bland.ai:", blandUrl.toString())
-
+    // Make request to Bland AI
     const response = await fetch(blandUrl.toString(), {
-      method: "GET",
       headers: {
-        Authorization: `Bearer ${process.env.BLAND_AI_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
     })
 
-    console.log("📡 Bland.ai response status:", response.status)
-
     if (!response.ok) {
       const errorText = await response.text()
-      console.error("❌ Bland.ai API error:", response.status, errorText)
-      return NextResponse.json(
-        { error: `Bland.ai API error: ${response.status} ${errorText}` },
-        { status: response.status },
-      )
+      console.error(`❌ [PROXY-CALLS] Bland API error: ${response.status} - ${errorText}`)
+      return NextResponse.json({ error: `Bland API error: ${response.status}` }, { status: response.status })
     }
 
     const data = await response.json()
-    console.log("✅ Bland.ai raw response:", {
-      count: data.count,
-      totalCalls: data.calls?.length || 0,
-      hasData: !!data.calls,
-      sampleCall: data.calls?.[0]
-        ? {
-            call_id: data.calls[0].call_id,
-            created_at: data.calls[0].created_at,
-            call_length: data.calls[0].call_length,
-            to: data.calls[0].to,
-            from: data.calls[0].from,
-            queue_status: data.calls[0].queue_status,
-            completed: data.calls[0].completed,
-          }
-        : null,
-    })
+    console.log(`✅ [PROXY-CALLS] Received ${data.calls?.length || 0} calls`)
 
     // Transform the response to match our expected format
     const transformedCalls =
@@ -101,13 +87,22 @@ export async function GET(request: NextRequest) {
         : null,
     })
 
+    // Get the authenticated user
+    const supabase = createClient()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
+    const userId = session?.user?.id
+
+    console.log(`👤 [PROXY-CALLS] User ID: ${userId || "not authenticated"}`)
+
     return NextResponse.json({
       calls: transformedCalls,
-      count: data.count || transformedCalls.length,
-      total: data.count || transformedCalls.length,
+      pagination: data.pagination,
+      user_id: userId || null,
     })
-  } catch (error) {
-    console.error("💥 Bland.ai proxy error:", error)
-    return NextResponse.json({ error: "Failed to fetch calls from Bland.ai" }, { status: 500 })
+  } catch (error: any) {
+    console.error("❌ [PROXY-CALLS] Error:", error.message)
+    return NextResponse.json({ error: `Internal server error: ${error.message}` }, { status: 500 })
   }
 }
