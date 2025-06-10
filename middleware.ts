@@ -1,35 +1,35 @@
+import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs"
 import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
-import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs"
-import type { Database } from "@/types/supabase"
 
 export async function middleware(req: NextRequest) {
-  // Create a response object that can be modified
   const res = NextResponse.next()
 
-  // Create Supabase client bound to the current request/response
-  const supabase = createMiddlewareClient<Database>({ req, res })
+  // Create a Supabase client configured to use cookies
+  const supabase = createMiddlewareClient({ req, res })
 
-  // Attempt to get the current session
+  // Refresh session if expired - required for Server Components
   const {
-    data: { session },
-  } = await supabase.auth.getSession()
+    data: { user },
+    error,
+  } = await supabase.auth.getUser()
 
-  const pathname = req.nextUrl.pathname
+  console.log("[MIDDLEWARE] User check:", {
+    hasUser: !!user,
+    userEmail: user?.email,
+    error: error?.message,
+    path: req.nextUrl.pathname,
+  })
 
-  console.log(`[MIDDLEWARE] ${pathname} - Session: ${session ? "✅" : "❌"}`)
-
-  // Redirect unauthenticated users away from protected dashboard routes
-  if (!session && pathname.startsWith("/dashboard")) {
-    console.log(`🔒 [MIDDLEWARE] No auth, redirecting ${pathname} → /login`)
-    const loginUrl = new URL("/login", req.url)
-    loginUrl.searchParams.set("redirect", pathname)
-    return NextResponse.redirect(loginUrl)
+  // If user is not signed in and the current path is a protected route, redirect the user to /login
+  if (!user && req.nextUrl.pathname.startsWith("/dashboard")) {
+    console.log("[MIDDLEWARE] Redirecting to login - no user found")
+    return NextResponse.redirect(new URL("/login", req.url))
   }
 
-  // Redirect logged-in users away from auth pages
-  if (session && (pathname === "/login" || pathname === "/signup")) {
-    console.log(`🔄 [MIDDLEWARE] Authenticated user on ${pathname}, redirecting to /dashboard`)
+  // If user is signed in and the current path is /login, redirect to /dashboard
+  if (user && req.nextUrl.pathname === "/login") {
+    console.log("[MIDDLEWARE] Redirecting to dashboard - user already logged in")
     return NextResponse.redirect(new URL("/dashboard", req.url))
   }
 
@@ -37,5 +37,14 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|public).*)"],
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder
+     */
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+  ],
 }

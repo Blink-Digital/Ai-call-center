@@ -73,3 +73,74 @@ export async function GET(request: NextRequest, { params }: { params: { phoneNum
     )
   }
 }
+
+export async function POST(request: NextRequest, { params }: { params: { phoneNumber: string } }) {
+  try {
+    const { phoneNumber } = params
+    const body = await request.json()
+    const { pathwayId, pathwayName, pathwayDescription, userId, updateTimestamp } = body
+
+    if (!phoneNumber) {
+      return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
+    }
+
+    console.log("[PHONE-PATHWAY-SAVE] 💾 Saving pathway for phone:", phoneNumber)
+
+    // Create Supabase client for this request
+    const supabase = createRouteHandlerClient<Database>({ cookies })
+
+    // Get the current user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      console.error("[PHONE-PATHWAY-SAVE] ❌ Auth error:", userError?.message || "No user found")
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 })
+    }
+
+    // Verify user ID matches if provided
+    if (userId && user.id !== userId) {
+      console.error("[PHONE-PATHWAY-SAVE] ❌ User ID mismatch")
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+    }
+
+    console.log("[PHONE-PATHWAY-SAVE] ✅ User authenticated:", user.email)
+
+    // Update the phone number record with pathway information
+    const updateData: any = {}
+
+    if (pathwayId) updateData.pathway_id = pathwayId
+    if (pathwayName) updateData.pathway_name = pathwayName
+    if (pathwayDescription) updateData.pathway_description = pathwayDescription
+    if (updateTimestamp) updateData.updated_at = new Date().toISOString()
+
+    const { data: updatedRecord, error: updateError } = await supabase
+      .from("phone_numbers")
+      .update(updateData)
+      .eq("user_id", user.id)
+      .eq("number", phoneNumber)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error("[PHONE-PATHWAY-SAVE] ❌ Update error:", updateError)
+      return NextResponse.json({ error: "Failed to update phone number: " + updateError.message }, { status: 500 })
+    }
+
+    console.log("[PHONE-PATHWAY-SAVE] ✅ Phone record updated:", updatedRecord.number)
+
+    return NextResponse.json({
+      success: true,
+      data: updatedRecord,
+      message: "Pathway information saved successfully",
+    })
+  } catch (error) {
+    console.error("[PHONE-PATHWAY-SAVE] ❌ Unexpected error:", error)
+    return NextResponse.json(
+      { error: "Internal server error: " + (error instanceof Error ? error.message : "Unknown error") },
+      { status: 500 },
+    )
+  }
+}
