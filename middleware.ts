@@ -8,69 +8,81 @@ export async function middleware(req: NextRequest) {
     // Create a response object that can be modified
     const res = NextResponse.next()
 
-    // Create Supabase client bound to the current request/response
-    // This properly handles cookies in the Edge runtime
+    // Create Supabase middleware client with proper cookie handling
     const supabase = createMiddlewareClient<Database>({ req, res })
 
-    // Use getUser() instead of getSession() for more reliable auth detection
-    // getUser() validates the JWT token directly and is more reliable in middleware
+    // Use getUser() instead of getSession() for reliable auth detection in Edge runtime
     const {
       data: { user },
-      error: userError,
+      error: authError,
     } = await supabase.auth.getUser()
 
     const pathname = req.nextUrl.pathname
     const isAuthPage = pathname === "/login" || pathname === "/signup"
-    const isDashboardRoute = pathname.startsWith("/dashboard")
+    const isProtectedRoute = pathname.startsWith("/dashboard")
 
-    // Enhanced logging for debugging
-    console.log(`[MIDDLEWARE] ${pathname}`)
-    console.log(`[MIDDLEWARE] User: ${user ? "✅ Authenticated" : "❌ Not authenticated"}`)
+    // Detailed logging for debugging
+    console.log(`🔍 [MIDDLEWARE] Processing: ${pathname}`)
+    console.log(`👤 [MIDDLEWARE] User status: ${user ? "✅ Authenticated" : "❌ Not authenticated"}`)
+
     if (user) {
-      console.log(`[MIDDLEWARE] User ID: ${user.id}, Email: ${user.email}`)
-    }
-    if (userError) {
-      console.log(`[MIDDLEWARE] Auth error:`, userError.message)
+      console.log(`📧 [MIDDLEWARE] User: ${user.email} (ID: ${user.id})`)
     }
 
-    // Redirect unauthenticated users away from protected dashboard routes
-    if (!user && isDashboardRoute) {
-      console.log(`🔒 [MIDDLEWARE] Redirecting unauthenticated user: ${pathname} → /login`)
+    if (authError) {
+      console.log(`⚠️ [MIDDLEWARE] Auth error: ${authError.message}`)
+    }
+
+    // RULE 1: Redirect unauthenticated users away from protected routes
+    if (!user && isProtectedRoute) {
+      console.log(`🔒 [MIDDLEWARE] Blocking unauthenticated access to ${pathname}`)
+      console.log(`↩️ [MIDDLEWARE] Redirecting to /login`)
+
       const loginUrl = new URL("/login", req.url)
       loginUrl.searchParams.set("redirect", pathname)
       return NextResponse.redirect(loginUrl)
     }
 
-    // Redirect authenticated users away from auth pages
+    // RULE 2: Redirect authenticated users away from auth pages
     if (user && isAuthPage) {
-      console.log(`🔄 [MIDDLEWARE] Redirecting authenticated user: ${pathname} → /dashboard`)
+      console.log(`🔄 [MIDDLEWARE] Authenticated user on auth page: ${pathname}`)
+
+      // Check for redirect parameter from login flow
       const redirectTo = req.nextUrl.searchParams.get("redirect") || "/dashboard"
+      console.log(`↩️ [MIDDLEWARE] Redirecting authenticated user to: ${redirectTo}`)
+
       return NextResponse.redirect(new URL(redirectTo, req.url))
     }
 
-    // For all other routes, continue normally
+    // RULE 3: Allow all other requests to proceed
     console.log(`✅ [MIDDLEWARE] Allowing access to ${pathname}`)
     return res
   } catch (error) {
-    // Handle any unexpected errors gracefully
-    console.error(`[MIDDLEWARE] Unexpected error:`, error)
+    // Handle unexpected errors gracefully
+    console.error(`🚨 [MIDDLEWARE] Unexpected error on ${req.nextUrl.pathname}:`, error)
 
-    // If there's an error and user is trying to access dashboard, redirect to login
+    // If error occurs on protected route, redirect to login as fallback
     if (req.nextUrl.pathname.startsWith("/dashboard")) {
-      console.log(`🚨 [MIDDLEWARE] Error occurred, redirecting to login`)
+      console.log(`🔄 [MIDDLEWARE] Error fallback: redirecting to /login`)
       return NextResponse.redirect(new URL("/login", req.url))
     }
 
-    // Otherwise, continue normally
+    // For non-protected routes, continue normally
     return NextResponse.next()
   }
 }
 
 export const config = {
-  // Match all routes except:
-  // - Static files (_next/static)
-  // - Image optimization (_next/image)
-  // - Favicon and other public assets
-  // - API routes (handled separately)
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
+  // Match all routes except static assets, images, and API routes
+  matcher: [
+    /*
+     * Match all request paths except for the ones starting with:
+     * - api (API routes)
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - favicon.ico (favicon file)
+     * - public folder files (images, etc.)
+     */
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)",
+  ],
 }
