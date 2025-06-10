@@ -102,6 +102,7 @@ export interface Database {
           updated_at: string
           data: Json
           bland_id: string | null
+          phone_number: string | null // 🆕 NEW: Phone number field
         }
         Insert: {
           id?: string
@@ -114,6 +115,7 @@ export interface Database {
           updated_at?: string
           data: Json
           bland_id?: string | null
+          phone_number?: string | null // 🆕 NEW: Phone number field
         }
         Update: {
           id?: string
@@ -126,6 +128,7 @@ export interface Database {
           updated_at?: string
           data?: Json
           bland_id?: string | null
+          phone_number?: string | null // 🆕 NEW: Phone number field
         }
       }
       activities: {

@@ -34,6 +34,7 @@ import { TestPathwayDialog } from "./test-pathway-dialog"
 import { getVariableTypeByName, getVariableDescription } from "@/config/flowchart-defaults"
 import { SendTestCallDialog } from "./send-test-call-dialog"
 import { useAuth } from "@/contexts/auth-context"
+import { saveFlowchart as saveFlowchartUtil } from "@/utils/save-flowchart" // Declare the saveFlowchart variable
 
 const initialEdges: Edge[] = []
 
@@ -531,7 +532,13 @@ export function FlowchartBuilder({
   }, [initialPathwayId])
 
   // ✅ Show loading state while auth is loading
-  if (authLoading) {
+  const [authLoaded, setAuthLoaded] = useState(false)
+
+  useEffect(() => {
+    setAuthLoaded(true)
+  }, [])
+
+  if (!authLoaded) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
@@ -554,51 +561,110 @@ export function FlowchartBuilder({
     )
   }
 
+  const loadFlowchartFromDatabase = async (phoneNumber: string) => {
+    if (!user || !phoneNumber) return null
+
+    try {
+      const response = await fetch(`/api/flowcharts?phoneNumber=${encodeURIComponent(phoneNumber)}`, {
+        method: "GET",
+        credentials: "include",
+      })
+
+      if (!response.ok) {
+        if (response.status === 404) {
+          console.log(`[LOAD] No flowchart found in database for ${phoneNumber}`)
+          return null
+        }
+        throw new Error("Failed to load flowchart from database")
+      }
+
+      const result = await response.json()
+
+      if (result.success && result.pathway?.data) {
+        console.log(`[LOAD] ✅ Loaded flowchart from database for ${phoneNumber}`)
+        return result.pathway
+      }
+
+      return null
+    } catch (error) {
+      console.error("Error loading flowchart from database:", error)
+      return null
+    }
+  }
+
   // Load saved flowchart on component mount
   useEffect(() => {
-    try {
-      if (initialData) {
-        if (initialData.name) setPathwayName(initialData.name)
-        if (initialData.description) setPathwayDescription(initialData.description)
-        return
-      }
-
-      // Set initial pathway name from props
-      if (initialPathwayName) {
-        setPathwayName(initialPathwayName)
-      } else if (phoneNumber) {
-        const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
-        setPathwayName(`Pathway for ${formattedNumber}`)
-        setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
-      }
-
-      const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
-
-      const savedFlow = localStorage.getItem(storageKey)
-      if (savedFlow) {
-        const flow = JSON.parse(savedFlow)
-        if (flow.nodes && flow.edges) {
-          setNodes(flow.nodes)
-          setEdges(flow.edges)
-
-          if (flow.name) setPathwayName(flow.name)
-          if (flow.description) setPathwayDescription(flow.description)
-
-          toast({
-            title: "Flowchart loaded",
-            description: "Your saved flowchart has been loaded successfully.",
-          })
+    const loadFlowchart = async () => {
+      try {
+        if (initialData) {
+          if (initialData.name) setPathwayName(initialData.name)
+          if (initialData.description) setPathwayDescription(initialData.description)
+          return
         }
-      }
 
-      const savedApiKey = localStorage.getItem("bland-api-key")
-      if (savedApiKey) {
-        setApiKey(savedApiKey)
+        // Set initial pathway name from props
+        if (initialPathwayName) {
+          setPathwayName(initialPathwayName)
+        } else if (phoneNumber) {
+          const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
+          setPathwayName(`Pathway for ${formattedNumber}`)
+          setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
+        }
+
+        // Try to load from database first
+        if (phoneNumber && user) {
+          const databaseFlowchart = await loadFlowchartFromDatabase(phoneNumber)
+
+          if (databaseFlowchart?.data) {
+            const flow = databaseFlowchart.data
+            if (flow.nodes && flow.edges) {
+              setNodes(flow.nodes)
+              setEdges(flow.edges)
+
+              if (databaseFlowchart.name) setPathwayName(databaseFlowchart.name)
+              if (databaseFlowchart.description) setPathwayDescription(databaseFlowchart.description)
+
+              toast({
+                title: "Flowchart loaded",
+                description: "Loaded your saved flowchart from the cloud.",
+              })
+              return
+            }
+          }
+        }
+
+        // Fallback to localStorage
+        const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
+        const savedFlow = localStorage.getItem(storageKey)
+
+        if (savedFlow) {
+          const flow = JSON.parse(savedFlow)
+          if (flow.nodes && flow.edges) {
+            setNodes(flow.nodes)
+            setEdges(flow.edges)
+
+            if (flow.name) setPathwayName(flow.name)
+            if (flow.description) setPathwayDescription(flow.description)
+
+            toast({
+              title: "Flowchart loaded",
+              description: "Loaded your saved flowchart from local storage.",
+            })
+          }
+        }
+
+        // Load saved API key
+        const savedApiKey = localStorage.getItem("bland-api-key")
+        if (savedApiKey) {
+          setApiKey(savedApiKey)
+        }
+      } catch (error) {
+        console.error("Error loading flowchart:", error)
       }
-    } catch (error) {
-      console.error("Error loading flowchart:", error)
     }
-  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName])
+
+    loadFlowchart()
+  }, [setNodes, setEdges, phoneNumber, initialData, initialPathwayName, user])
 
   // Update Bland.ai payload preview whenever nodes or edges change
   useEffect(() => {
@@ -817,468 +883,6 @@ export function FlowchartBuilder({
     [reactFlowInstance, setNodes],
   )
 
-  const saveFlowchart = () => {
-    if (reactFlowInstance) {
-      const flow = reactFlowInstance.toObject()
-      flow.name = pathwayName || "Bland.ai Pathway"
-      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
-
-      const storageKey = phoneNumber ? `bland-flowchart-${phoneNumber}` : "bland-flowchart"
-      localStorage.setItem(storageKey, JSON.stringify(flow))
-      localStorage.setItem("flowchartData", JSON.stringify(flow))
-
-      toast({
-        title: "Flowchart saved",
-        description: "Your flowchart has been saved successfully.",
-      })
-    } else {
-      toast({
-        title: "Error saving flowchart",
-        description: "There was an error saving your flowchart. Please try again.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  const testConnection = async () => {
-    if (!apiKey) {
-      toast({
-        title: "Missing API key",
-        description: "Please provide your Bland.ai API key.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsTesting(true)
-    setConnectionStatus("idle")
-    setConnectionMessage("")
-    setDebugInfo(null)
-
-    try {
-      const response = await fetch("/api/bland-ai/test-connection", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          apiKey,
-        }),
-        credentials: "include",
-      })
-
-      const data = await response.json()
-      setDebugInfo(data)
-
-      if (response.ok && data.status === "success") {
-        setConnectionStatus("success")
-        setConnectionMessage("Successfully connected to Bland.ai API")
-        localStorage.setItem("bland-api-key", apiKey)
-
-        toast({
-          title: "Connection successful",
-          description: "Successfully connected to Bland.ai API.",
-        })
-      } else {
-        setConnectionStatus("error")
-        setConnectionMessage(data.message || "Failed to connect to Bland.ai API")
-
-        toast({
-          title: "Connection failed",
-          description: data.message || "Failed to connect to Bland.ai API",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error testing connection:", error)
-      setConnectionStatus("error")
-      setConnectionMessage(error instanceof Error ? error.message : "Unknown error occurred")
-
-      toast({
-        title: "Connection error",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsTesting(false)
-    }
-  }
-
-  // ✅ NEW: Clean deployment handler
-  const handleDeploy = async () => {
-    if (!reactFlowInstance) {
-      toast({
-        title: "Error",
-        description: "Flowchart not ready. Please wait a moment and try again.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!pathwayName.trim()) {
-      toast({
-        title: "Missing pathway name",
-        description: "Please provide a name for your pathway.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Open the deployment dialog
-    setDeployDialogOpen(true)
-  }
-
-  // ✅ NEW: Simplified deployment execution
-  const executeDeployment = async () => {
-    if (!apiKey || !pathwayName) {
-      toast({
-        title: "Missing information",
-        description: "Please provide your API key and pathway name.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsDeploying(true)
-    setDeploymentResult(null)
-    setDeploymentError(null)
-    setDeployDialogOpen(false)
-
-    try {
-      // Get current flowchart data
-      const flow = reactFlowInstance.toObject()
-      flow.name = pathwayName
-      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
-
-      // Convert to Bland.ai format
-      const blandFormat = convertFlowchartToBlandFormat(flow)
-
-      // Ensure we have a start node
-      if (!blandFormat.nodes.some((node) => node.data && node.data.isStart === true)) {
-        const firstDefaultNode = blandFormat.nodes.find((node) => node.type === "Default")
-        if (firstDefaultNode) {
-          firstDefaultNode.data.isStart = true
-        } else if (blandFormat.nodes.length > 0) {
-          if (!blandFormat.nodes[0].data) blandFormat.nodes[0].data = {}
-          blandFormat.nodes[0].data.isStart = true
-        } else {
-          throw new Error("No nodes found in pathway. Cannot deploy empty pathway.")
-        }
-      }
-
-      let pathwayId = existingPathwayId
-      const isFirstTimeDeployment = !pathwayId
-
-      if (isFirstTimeDeployment) {
-        // ✅ FIRST-TIME DEPLOYMENT: Create new pathway
-        console.log("[DEPLOYMENT] 🆕 Creating new pathway...")
-
-        const createResponse = await fetch("/api/bland-ai/create-pathway", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiKey,
-            name: pathwayName,
-            description: pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`,
-          }),
-          credentials: "include",
-        })
-
-        const createData = await createResponse.json()
-
-        if (!createResponse.ok) {
-          throw new Error(createData.message || "Failed to create pathway")
-        }
-
-        pathwayId = createData.data?.data?.pathway_id
-        if (!pathwayId) {
-          throw new Error("No pathway ID returned from create API")
-        }
-
-        console.log("[DEPLOYMENT] ✅ New pathway created:", pathwayId)
-
-        // ✅ Save pathway ID to database
-        if (phoneNumber) {
-          await savePathwayToDatabase(pathwayId)
-          setExistingPathwayId(pathwayId) // Update state
-        }
-      }
-
-      // ✅ UPDATE PATHWAY: Send flowchart data (for both new and existing)
-      console.log("[DEPLOYMENT] 📤 Updating pathway with flowchart data...")
-
-      const updateResponse = await fetch("/api/bland-ai/update-pathway", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey,
-          pathwayId,
-          flowchart: blandFormat,
-        }),
-        credentials: "include",
-      })
-
-      const updateData = await updateResponse.json()
-
-      if (!updateResponse.ok) {
-        if (updateData.validationErrors) {
-          throw new Error("Validation errors: " + updateData.validationErrors.join(", "))
-        }
-        throw new Error(updateData.message || "Failed to update pathway")
-      }
-
-      // ✅ Update deployment timestamp
-      if (phoneNumber && !isFirstTimeDeployment) {
-        await updateDeploymentTimestamp(pathwayId)
-      }
-
-      setDeploymentResult({
-        pathwayId,
-        isFirstTimeDeployment,
-        updateResponse: updateData,
-      })
-
-      // ✅ Success toast
-      const successMessage = isFirstTimeDeployment
-        ? `✅ New pathway created with ID: ${pathwayId}`
-        : `✅ Existing pathway updated successfully: ${pathwayId}`
-
-      toast({
-        title: "Deployment successful",
-        description: successMessage,
-      })
-
-      console.log("[DEPLOYMENT] 🎉", successMessage)
-    } catch (error) {
-      console.error("[DEPLOYMENT] ❌ Error:", error)
-      setDeploymentError(error instanceof Error ? error.message : "Unknown error occurred")
-
-      toast({
-        title: "Deployment failed",
-        description: error instanceof Error ? error.message : "Unknown error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsDeploying(false)
-    }
-  }
-
-  // ✅ NEW: Database helper functions
-  const savePathwayToDatabase = async (pathwayId: string) => {
-    if (!phoneNumber || !user) return false
-
-    try {
-      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pathwayId,
-          pathwayName,
-          pathwayDescription,
-          userId: user.id,
-        }),
-        credentials: "include",
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }))
-        console.error("[DATABASE] ❌ Failed to save:", errorData.error)
-        return false
-      }
-
-      const result = await response.json()
-
-      if (result.success) {
-        console.log("[DATABASE] ✅ Pathway saved to database")
-        toast({
-          title: "Pathway linked",
-          description: "Phone number is now linked to this pathway",
-        })
-        return true
-      } else {
-        console.error("[DATABASE] ❌ Failed to save:", result.error)
-        return false
-      }
-    } catch (error) {
-      console.error("[DATABASE] ❌ Error saving pathway:", error)
-      return false
-    }
-  }
-
-  const updateDeploymentTimestamp = async (pathwayId: string) => {
-    if (!phoneNumber) return false
-
-    try {
-      const response = await fetch(`/api/phone-numbers/${encodeURIComponent(phoneNumber)}/pathway`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pathwayId,
-          pathwayName,
-          pathwayDescription,
-          updateTimestamp: true,
-        }),
-        credentials: "include",
-      })
-
-      const result = await response.json()
-      if (result.success) {
-        console.log("[DATABASE] 🕒 Deployment timestamp updated")
-      }
-      return result.success
-    } catch (error) {
-      console.error("[DATABASE] ❌ Error updating timestamp:", error)
-      return false
-    }
-  }
-
-  // ✅ FIXED: Fetch existing pathway function with better error handling
-  const fetchExistingPathway = useCallback(
-    async (phoneNumber: string, userId: string) => {
-      if (!phoneNumber) {
-        console.log("[FLOWCHART-BUILDER] ❌ No phone number provided")
-        return
-      }
-
-      console.log("[FLOWCHART-BUILDER] 🚀 Starting fetchExistingPathway...")
-      console.log("[FLOWCHART-BUILDER] Input phone number:", phoneNumber)
-      console.log("[FLOWCHART-BUILDER] User ID:", userId)
-
-      setIsLoadingPathway(true)
-
-      try {
-        // ✅ FIXED: Use the correct parameter name 'phone' instead of 'phoneNumber'
-        const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
-          method: "GET",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        })
-
-        console.log("[FLOWCHART-BUILDER] 📡 Response status:", response.status)
-
-        if (!response.ok) {
-          // ✅ SILENT HANDLING: Don't show error toasts for auth failures
-          if (response.status === 401) {
-            console.warn("[FLOWCHART-BUILDER] ⚠️ Authentication failed - user may need to refresh")
-            // Don't show error toast, just log it
-            return
-          }
-
-          const errorData = await response.json().catch(() => ({ error: "Failed to parse error response" }))
-          console.error("[FLOWCHART-BUILDER] ❌ API error:", errorData.error)
-
-          // Only show toast for non-auth errors
-          if (response.status !== 401) {
-            toast({
-              title: "Error loading pathway",
-              description: errorData.error || "Failed to fetch pathway information.",
-              variant: "destructive",
-            })
-          }
-          return
-        }
-
-        const data = await response.json()
-        console.log("[FLOWCHART-BUILDER] 📊 API response:", data)
-
-        if (data.success && data.pathway_id) {
-          console.log("[FLOWCHART-BUILDER] 🎯 EXISTING PATHWAY FOUND:", data.pathway_id)
-          setExistingPathwayId(data.pathway_id)
-
-          if (data.pathway_name) {
-            console.log("[FLOWCHART-BUILDER] 📝 Setting pathway name:", data.pathway_name)
-            setPathwayName(data.pathway_name)
-          }
-
-          if (data.pathway_description) {
-            console.log("[FLOWCHART-BUILDER] 📝 Setting pathway description:", data.pathway_description)
-            setPathwayDescription(data.pathway_description)
-          }
-
-          // ✅ Only show success toast if we actually found a pathway
-          toast({
-            title: "✅ Existing pathway found",
-            description: `Loaded pathway: ${data.pathway_name || data.pathway_id}`,
-          })
-        } else {
-          console.log("[FLOWCHART-BUILDER] ❌ No existing pathway found for this phone number")
-          // Don't show error toast for this case - it's normal for new pathways
-        }
-      } catch (error) {
-        console.error("[FLOWCHART-BUILDER] ❌ Unexpected error in fetchExistingPathway:", error)
-        // ✅ SILENT HANDLING: Don't show error toast for network errors
-        // The user can still use the flowchart builder even if pathway lookup fails
-      } finally {
-        setIsLoadingPathway(false)
-        console.log("[FLOWCHART-BUILDER] 🏁 fetchExistingPathway completed")
-      }
-    },
-    [setExistingPathwayId, setPathwayName, setPathwayDescription, setIsLoadingPathway],
-  )
-
-  // ✅ NEW: Handle import JSON function
-  const handleImportJson = (jsonData: any) => {
-    try {
-      // If we have a convertBlandFormatToFlowchart function, use it
-      // Otherwise, assume the JSON is already in flowchart format
-      let flowchartData = jsonData
-
-      // Check if we need to convert from Bland format
-      if (jsonData.nodes && jsonData.edges) {
-        // Assume it's already in flowchart format
-        flowchartData = jsonData
-      }
-
-      setNodes(flowchartData.nodes || [])
-      setEdges(flowchartData.edges || [])
-
-      if (flowchartData.name) setPathwayName(flowchartData.name)
-      if (flowchartData.description) setPathwayDescription(flowchartData.description)
-
-      if (reactFlowInstance) {
-        setTimeout(() => {
-          reactFlowInstance.fitView({ padding: 0.2 })
-        }, 100)
-      }
-
-      toast({
-        title: "Import successful",
-        description: "The flowchart has been imported successfully.",
-      })
-    } catch (error) {
-      console.error("Error importing JSON:", error)
-      toast({
-        title: "Import failed",
-        description: error instanceof Error ? error.message : "Failed to import JSON",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // ✅ Fetch pathway info when component mounts and user is authenticated
-  useEffect(() => {
-    if (phoneNumber && user && !authLoading) {
-      // Add a small delay to ensure the page is fully loaded
-      const timer = setTimeout(() => {
-        fetchExistingPathway(phoneNumber, user.id)
-      }, 1000)
-
-      return () => clearTimeout(timer)
-    }
-  }, [phoneNumber, user, authLoading, fetchExistingPathway])
-
-  // 🔍 DEBUG: Monitor existingPathwayId state changes
-  useEffect(() => {
-    console.log("[FLOWCHART-BUILDER] 🔄 existingPathwayId state changed:", existingPathwayId)
-  }, [existingPathwayId])
-
-  // 🔍 DEBUG: Monitor phoneNumber changes
-  useEffect(() => {
-    console.log("[FLOWCHART-BUILDER] 📞 phoneNumber prop changed:", phoneNumber)
-  }, [phoneNumber])
-
   const copyPayloadToClipboard = () => {
     if (apiPayload) {
       navigator.clipboard.writeText(JSON.stringify(apiPayload, null, 2))
@@ -1359,6 +963,152 @@ export function FlowchartBuilder({
     event.dataTransfer.dropEffect = "move"
   }, [])
 
+  const handleImportJson = useCallback(
+    (json: any) => {
+      try {
+        const parsedFlowchart = JSON.parse(json)
+        const normalizedFlowchart = normalizeNodeIds(parsedFlowchart)
+
+        if (normalizedFlowchart && normalizedFlowchart.nodes && normalizedFlowchart.edges) {
+          setNodes(normalizedFlowchart.nodes)
+          setEdges(normalizedFlowchart.edges)
+
+          toast({
+            title: "Flowchart imported",
+            description: "Successfully imported flowchart from JSON.",
+          })
+        } else {
+          toast({
+            title: "Invalid JSON",
+            description: "The JSON file does not contain a valid flowchart.",
+            variant: "destructive",
+          })
+        }
+      } catch (error) {
+        console.error("Error importing JSON:", error)
+        toast({
+          title: "Error importing JSON",
+          description: "There was an error importing the JSON file.",
+          variant: "destructive",
+        })
+      }
+    },
+    [setNodes, setEdges],
+  )
+
+  const handleDeploy = useCallback(async () => {
+    setDeployDialogOpen(true)
+  }, [])
+
+  const testConnection = useCallback(async () => {
+    setIsTesting(true)
+    setConnectionStatus("idle")
+    setConnectionMessage("")
+
+    try {
+      const response = await fetch("/api/bland", {
+        method: "GET",
+        headers: {
+          "X-API-Key": apiKey,
+        },
+      })
+
+      if (response.ok) {
+        setConnectionStatus("success")
+        setConnectionMessage("Successfully connected to Bland.ai API.")
+      } else {
+        setConnectionStatus("error")
+        setConnectionMessage(`Connection failed: ${response.statusText}`)
+      }
+    } catch (error: any) {
+      console.error("Connection test error:", error)
+      setConnectionStatus("error")
+      setConnectionMessage(`Connection failed: ${error.message}`)
+    } finally {
+      setIsTesting(false)
+    }
+  }, [apiKey])
+
+  const executeDeployment = useCallback(async () => {
+    setIsDeploying(true)
+    setDeploymentError(null)
+    setDeploymentResult(null)
+
+    try {
+      if (!blandPayload) {
+        throw new Error("No Bland.ai payload available.")
+      }
+
+      const payload = {
+        apiKey,
+        pathwayName,
+        pathwayDescription,
+        pathwayData: blandPayload,
+        existingPathwayId,
+      }
+
+      const response = await fetch("/api/bland", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Deployment failed")
+      }
+
+      setDeploymentResult(result)
+      toast({
+        title: "Pathway deployed",
+        description: `Pathway deployed successfully with ID: ${result.pathwayId}`,
+      })
+    } catch (error: any) {
+      console.error("Deployment error:", error)
+      setDeploymentError(error.message)
+      toast({
+        title: "Deployment failed",
+        description: error.message,
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeploying(false)
+      setDeployDialogOpen(false)
+    }
+  }, [apiKey, pathwayName, pathwayDescription, blandPayload, existingPathwayId])
+
+  const handleSaveFlowchart = async () => {
+    if (!reactFlowInstance || !user || !phoneNumber) {
+      toast({
+        title: "Cannot save",
+        description: "Missing required information to save flowchart.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const flow = reactFlowInstance.toObject()
+
+    const result = await saveFlowchartUtil({
+      nodes: flow.nodes,
+      edges: flow.edges,
+      phoneNumber,
+      pathwayName: pathwayName || `Pathway for ${phoneNumber}`,
+      pathwayDescription: pathwayDescription || `Call flow for phone number ${phoneNumber}`,
+      user,
+    })
+
+    if (result.success && result.pathway) {
+      // Update the existing pathway ID if this was a new creation
+      if (result.action === "created" && result.pathway.id) {
+        setExistingPathwayId(result.pathway.id)
+      }
+    }
+  }
+
   return (
     <>
       {/* Main Layout - Full Screen Flex Container */}
@@ -1399,7 +1149,7 @@ export function FlowchartBuilder({
               />
               <Background variant="dots" gap={20} size={1} color="#e5e7eb" />
               <Panel position="top-right" className="flex gap-3 p-4">
-                <Button onClick={saveFlowchart} className="bg-green-600 hover:bg-green-700 shadow-md" size="sm">
+                <Button onClick={handleSaveFlowchart} className="bg-green-600 hover:bg-green-700 shadow-md" size="sm">
                   Save Flowchart
                 </Button>
                 <Button
