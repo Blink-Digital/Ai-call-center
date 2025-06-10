@@ -42,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ✅ Stable session refresh without router interference
   const refreshSession = async () => {
     try {
-      console.log("🔄 Refreshing session...")
+      console.log("🔄 [AUTH-CONTEXT] Refreshing session...")
 
       const {
         data: { session },
@@ -50,14 +50,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } = await supabase.auth.getSession()
 
       if (error) {
-        console.log("❌ Session error:", error.message)
+        console.log("❌ [AUTH-CONTEXT] Session error:", error.message)
         setUser(null)
         setLoading(false)
         return false
       }
 
       if (session?.user) {
-        console.log("✅ Valid session found:", session.user.id)
+        console.log("✅ [AUTH-CONTEXT] Valid session found:", session.user.id)
         setUser({
           id: session.user.id,
           email: session.user.email,
@@ -67,12 +67,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return true
       }
 
-      console.log("❌ No valid session found")
+      console.log("❌ [AUTH-CONTEXT] No valid session found")
       setUser(null)
       setLoading(false)
       return false
     } catch (error) {
-      console.error("❌ Session refresh failed:", error)
+      console.error("❌ [AUTH-CONTEXT] Session refresh failed:", error)
       setUser(null)
       setLoading(false)
       return false
@@ -84,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (initializedRef.current) return
     initializedRef.current = true
 
-    console.log("🔄 Initializing auth context...")
+    console.log("🔄 [AUTH-CONTEXT] Initializing auth context...")
 
     // Initial session check
     refreshSession()
@@ -93,38 +93,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("🔄 Auth state change:", event, session?.user?.id)
+      console.log("🔄 [AUTH-CONTEXT] Auth state change:", event, session?.user?.id)
 
       if (event === "SIGNED_IN" && session?.user) {
-        console.log("✅ User signed in, updating context...")
+        console.log("✅ [AUTH-CONTEXT] User signed in, updating context...")
         setUser({
           id: session.user.id,
           email: session.user.email,
           name: session.user.user_metadata?.name || session.user.email,
         })
         setLoading(false)
-        // ✅ Let middleware handle redirects, don't redirect here
+
+        // ✅ CRITICAL: Force a page refresh to ensure middleware sees the new session
+        console.log("🔄 [AUTH-CONTEXT] Forcing page refresh to sync middleware...")
+        window.location.href = "/dashboard"
       } else if (event === "SIGNED_OUT") {
-        console.log("🔄 User signed out, clearing context...")
+        console.log("🔄 [AUTH-CONTEXT] User signed out, clearing context...")
         setUser(null)
         setLoading(false)
       } else if (event === "INITIAL_SESSION") {
         // ✅ Handle initial session load properly
         if (session?.user) {
-          console.log("✅ Initial session confirmed:", session.user.id)
+          console.log("✅ [AUTH-CONTEXT] Initial session confirmed:", session.user.id)
           setUser({
             id: session.user.id,
             email: session.user.email,
             name: session.user.user_metadata?.name || session.user.email,
           })
         } else {
-          console.log("❌ No initial session found")
+          console.log("❌ [AUTH-CONTEXT] No initial session found")
           setUser(null)
         }
         setLoading(false)
       } else if (event === "TOKEN_REFRESHED") {
         // ✅ Handle token refresh without re-triggering data fetches
-        console.log("🔄 Token refreshed, session still valid")
+        console.log("🔄 [AUTH-CONTEXT] Token refreshed, session still valid")
         if (session?.user && !user) {
           setUser({
             id: session.user.id,
@@ -136,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
 
     return () => {
-      console.log("🧹 Cleaning up auth context...")
+      console.log("🧹 [AUTH-CONTEXT] Cleaning up auth context...")
       subscription.unsubscribe()
       initializedRef.current = false
     }
@@ -144,7 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     try {
-      console.log("🔄 Starting login for:", email)
+      console.log("🔄 [AUTH-CONTEXT] Starting login for:", email)
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -152,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
 
       if (error) {
-        console.error("❌ Login error:", error)
+        console.error("❌ [AUTH-CONTEXT] Login error:", error)
         return { success: false, message: error.message }
       }
 
@@ -160,18 +163,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, message: "Login failed - no user data received" }
       }
 
-      // ✅ CRITICAL FIX: Set session in cookies for middleware compatibility
-      console.log("🔄 Setting session in cookies for middleware...")
-      await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      })
+      console.log("✅ [AUTH-CONTEXT] Login successful, user:", data.user.id)
 
-      console.log("✅ Login successful, user:", data.user.id)
-      // ✅ Let middleware handle redirects, don't redirect here
+      // ✅ The onAuthStateChange handler will trigger and handle the redirect
       return { success: true, message: "Login successful" }
     } catch (error: any) {
-      console.error("❌ Unexpected login error:", error)
+      console.error("❌ [AUTH-CONTEXT] Unexpected login error:", error)
       return { success: false, message: error.message || "An unexpected error occurred" }
     }
   }
@@ -211,10 +208,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Error signing out:", error)
       }
       setUser(null)
-      // ✅ Let middleware handle redirects
+      // ✅ Force redirect to login
+      window.location.href = "/login"
     } catch (err) {
       console.error("Logout error:", err)
       setUser(null)
+      window.location.href = "/login"
     }
   }
 
