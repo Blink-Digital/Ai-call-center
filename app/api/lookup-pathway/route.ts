@@ -4,33 +4,43 @@ import { NextResponse } from "next/server"
 import type { Database } from "@/types/supabase"
 
 export async function GET(req: Request) {
-  try {
-    // Create Supabase client with proper cookie context
-    const supabase = createRouteHandlerClient<Database>({ cookies })
+  console.log("[LOOKUP-PATHWAY] 🚀 Starting pathway lookup...")
 
+  try {
+    // Get the phone parameter
     const { searchParams } = new URL(req.url)
     const phone = searchParams.get("phone")
 
-    console.log("[LOOKUP-PATHWAY] 🔍 Looking up pathway for phone:", phone)
+    console.log("[LOOKUP-PATHWAY] 📞 Phone parameter:", phone)
 
     if (!phone) {
       console.log("[LOOKUP-PATHWAY] ❌ Missing phone number parameter")
-      return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
+      return NextResponse.json(
+        {
+          error: "Phone number is required",
+          message: "Please provide 'phone' parameter",
+        },
+        { status: 400 },
+      )
     }
 
-    // Get authenticated user from server-side session
-    console.log("[LOOKUP-PATHWAY] 🔐 Attempting to get user from session...")
+    // ✅ CRITICAL: Proper Supabase client setup with cookies
+    console.log("[LOOKUP-PATHWAY] 🔧 Creating Supabase client with cookies...")
+    const supabase = createRouteHandlerClient<Database>({ cookies })
+
+    // ✅ Get the authenticated user
+    console.log("[LOOKUP-PATHWAY] 👤 Getting authenticated user...")
     const {
       data: { user },
-      error: userError,
+      error: authError,
     } = await supabase.auth.getUser()
 
-    if (userError) {
-      console.log("[LOOKUP-PATHWAY] ❌ Auth error:", userError.message)
+    if (authError) {
+      console.log("[LOOKUP-PATHWAY] ❌ Auth error:", authError.message)
       return NextResponse.json(
         {
           error: "Authentication failed",
-          details: userError.message,
+          details: authError.message,
         },
         { status: 401 },
       )
@@ -47,7 +57,7 @@ export async function GET(req: Request) {
       )
     }
 
-    console.log("[LOOKUP-PATHWAY] ✅ Authenticated user:", {
+    console.log("[LOOKUP-PATHWAY] ✅ User authenticated:", {
       id: user.id,
       email: user.email,
     })
@@ -58,27 +68,27 @@ export async function GET(req: Request) {
       return num.replace(/\D/g, "")
     }
 
-    // Query database for matching phone number
+    // ✅ Query database for matching phone number
     console.log("[LOOKUP-PATHWAY] 🔍 Querying database for user's phone numbers...")
-    const { data, error } = await supabase
+    const { data: phoneNumbers, error: queryError } = await supabase
       .from("phone_numbers")
       .select("*")
       .eq("user_id", user.id)
       .in("status", ["active", "purchased"])
       .order("created_at", { ascending: false })
 
-    if (error) {
-      console.error("[LOOKUP-PATHWAY] ❌ Database error:", error)
+    if (queryError) {
+      console.error("[LOOKUP-PATHWAY] ❌ Database error:", queryError)
       return NextResponse.json(
         {
           error: "Database query failed",
-          details: error.message,
+          details: queryError.message,
         },
         { status: 500 },
       )
     }
 
-    if (!data || data.length === 0) {
+    if (!phoneNumbers || phoneNumbers.length === 0) {
       console.log("[LOOKUP-PATHWAY] ❌ No phone numbers found for user:", user.id)
       return NextResponse.json({
         pathway_id: null,
@@ -88,13 +98,13 @@ export async function GET(req: Request) {
       })
     }
 
-    console.log("[LOOKUP-PATHWAY] 📋 Found", data.length, "phone numbers for user")
+    console.log("[LOOKUP-PATHWAY] 📋 Found", phoneNumbers.length, "phone numbers for user")
 
-    // Find matching phone number with enhanced matching logic
+    // ✅ Enhanced phone number matching logic
     const targetNormalized = normalizePhone(phone)
     let matchingPhone = null
 
-    for (const phoneRecord of data) {
+    for (const phoneRecord of phoneNumbers) {
       console.log(`[LOOKUP-PATHWAY] 🔍 Checking: "${phoneRecord.number}"`)
 
       // 1. Exact match
@@ -104,7 +114,7 @@ export async function GET(req: Request) {
         break
       }
 
-      // 2. Normalized match
+      // 2. Normalized match (remove all non-digits and compare)
       const storedNormalized = normalizePhone(phoneRecord.number)
       if (targetNormalized === storedNormalized) {
         console.log("[LOOKUP-PATHWAY] ✅ NORMALIZED MATCH FOUND!")
@@ -145,7 +155,7 @@ export async function GET(req: Request) {
     } else {
       console.log("[LOOKUP-PATHWAY] ❌ NO MATCHING PHONE NUMBER FOUND")
       console.log("[LOOKUP-PATHWAY] Available numbers:")
-      data.forEach((p, i) => {
+      phoneNumbers.forEach((p, i) => {
         console.log(`[LOOKUP-PATHWAY] ${i + 1}. "${p.number}" (normalized: "${normalizePhone(p.number)}")`)
       })
       console.log("[LOOKUP-PATHWAY] Target number:", phone)
@@ -155,7 +165,7 @@ export async function GET(req: Request) {
         pathway_id: null,
         phone_record: null,
         message: "No matching phone number found",
-        available_numbers: data.map((p) => p.number),
+        available_numbers: phoneNumbers.map((p) => p.number),
         success: false,
       })
     }

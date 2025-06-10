@@ -61,7 +61,6 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     }
   }, [phoneNumber])
 
-  // ✅ FIXED: Improved fetchPathwayInfo with silent error handling
   const fetchPathwayInfo = async () => {
     if (!phoneNumber || phoneNumber === "undefined" || phoneNumber === "null") {
       console.error("[PATHWAY-PAGE] ❌ Cannot fetch pathway info - invalid phone number")
@@ -70,7 +69,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       return
     }
 
-    // ✅ Wait for auth to be ready
+    // Wait for auth to be ready
     if (authLoading) {
       console.log("[PATHWAY-PAGE] ⏳ Waiting for auth to load...")
       return
@@ -99,28 +98,25 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
         return
       }
 
-      // ✅ Make API call using the shared auth context (no manual session handling)
+      // ✅ CRITICAL: Ensure proper cookie handling
+      console.log("[PATHWAY-PAGE] 📡 Making API request with phone:", phoneNumber)
       const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
         },
-        credentials: "include", // ✅ Include cookies for authentication
+        credentials: "include", // ✅ CRITICAL: Include cookies for authentication
       })
 
-      if (!response.ok) {
-        // ✅ SILENT HANDLING: Don't show error for auth failures
-        if (response.status === 401) {
-          console.warn("[PATHWAY-PAGE] ⚠️ Authentication failed - continuing with new pathway mode")
-          setPathwayInfo(null) // This will trigger "Create New" mode
-          setIsLoadingPathway(false)
-          return
-        }
+      console.log("[PATHWAY-PAGE] 📊 Response status:", response.status)
 
+      if (!response.ok) {
         const errorText = await response.text()
         console.error("[PATHWAY-PAGE] ❌ API error:", response.status, errorText)
 
-        if (response.status === 404) {
+        if (response.status === 401) {
+          setError("Authentication failed. Please refresh the page and log in again.")
+        } else if (response.status === 404) {
           console.log("[PATHWAY-PAGE] ℹ️ No existing pathway found - will create new")
           setPathwayInfo(null) // This will trigger "Create New" mode
         } else {
@@ -134,6 +130,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       console.log("[PATHWAY-PAGE] ✅ API response:", result)
 
       if (result.success && result.pathway_id) {
+        console.log("[PATHWAY-PAGE] 🎯 PATHWAY FOUND:", result.pathway_id)
         setPathwayInfo({
           pathway_id: result.pathway_id,
           pathway_name: result.pathway_name,
@@ -146,9 +143,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       }
     } catch (error) {
       console.error("[PATHWAY-PAGE] ❌ Error fetching pathway info:", error)
-      // ✅ SILENT HANDLING: Don't show error for network failures
-      // The user can still use the flowchart builder
-      setPathwayInfo(null)
+      setError(error instanceof Error ? error.message : "Unknown error")
     } finally {
       setIsLoadingPathway(false)
     }
@@ -168,7 +163,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     router.push(`/dashboard/call-flows/generate?phoneNumber=${phoneNumber}`)
   }
 
-  // ✅ Show loading state while auth is loading
+  // Show loading state while auth is loading
   if (authLoading) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
@@ -180,7 +175,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     )
   }
 
-  // ✅ Show auth required state
+  // Show auth required state
   if (!user) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
@@ -239,7 +234,13 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
         </div>
       </div>
 
-      {/* ✅ REMOVED: Error banner - errors are now handled silently */}
+      {error && (
+        <div className="p-4 bg-red-50 border-b border-red-200">
+          <div className="text-red-800">
+            <strong>Error:</strong> {error}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden">
         <FlowchartBuilder

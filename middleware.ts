@@ -10,27 +10,25 @@ export async function middleware(req: NextRequest) {
 
   // Refresh session if expired - required for Server Components
   const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
+    data: { session },
+  } = await supabase.auth.getSession()
 
-  console.log("[MIDDLEWARE] User check:", {
-    hasUser: !!user,
-    userEmail: user?.email,
-    error: error?.message,
+  console.log("[MIDDLEWARE] Session check:", {
     path: req.nextUrl.pathname,
+    hasSession: !!session,
+    userEmail: session?.user?.email,
   })
 
-  // If user is not signed in and the current path is a protected route, redirect the user to /login
-  if (!user && req.nextUrl.pathname.startsWith("/dashboard")) {
-    console.log("[MIDDLEWARE] Redirecting to login - no user found")
-    return NextResponse.redirect(new URL("/login", req.url))
-  }
+  // Protected routes that require authentication
+  const protectedPaths = ["/dashboard", "/api/lookup-pathway", "/api/phone-numbers", "/api/pathways", "/api/teams"]
 
-  // If user is signed in and the current path is /login, redirect to /dashboard
-  if (user && req.nextUrl.pathname === "/login") {
-    console.log("[MIDDLEWARE] Redirecting to dashboard - user already logged in")
-    return NextResponse.redirect(new URL("/dashboard", req.url))
+  const isProtectedPath = protectedPaths.some((path) => req.nextUrl.pathname.startsWith(path))
+
+  if (isProtectedPath && !session) {
+    console.log("[MIDDLEWARE] ❌ Redirecting unauthenticated user to login")
+    const redirectUrl = new URL("/login", req.url)
+    redirectUrl.searchParams.set("redirectTo", req.nextUrl.pathname)
+    return NextResponse.redirect(redirectUrl)
   }
 
   return res
@@ -43,7 +41,7 @@ export const config = {
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * - public folder
+     * Feel free to modify this pattern to include more paths.
      */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],

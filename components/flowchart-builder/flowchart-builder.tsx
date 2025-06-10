@@ -1134,7 +1134,7 @@ export function FlowchartBuilder({
     setIsLoadingPathway(true)
 
     try {
-      // ✅ Use the secure API route with automatic cookie-based auth
+      // ✅ FIXED: Use the correct parameter name 'phone' instead of 'phoneNumber'
       const response = await fetch(`/api/lookup-pathway?phone=${encodeURIComponent(phoneNumber)}`, {
         method: "GET",
         credentials: "include",
@@ -1252,7 +1252,7 @@ export function FlowchartBuilder({
 
       return () => clearTimeout(timer)
     }
-  }, [phoneNumber, user, authLoading])
+  }, [phoneNumber, user, authLoading, fetchExistingPathway])
 
   // 🔍 DEBUG: Monitor existingPathwayId state changes
   useEffect(() => {

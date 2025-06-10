@@ -1,32 +1,43 @@
-import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
+import { createServerClient, type CookieOptions } from "@supabase/ssr"
 import { cookies } from "next/headers"
 import type { Database } from "@/types/supabase"
 
-// For use in API routes
-export function createSupabaseServer() {
-  return createRouteHandlerClient<Database>({ cookies })
+export function createClient() {
+  const cookieStore = cookies()
+
+  return createServerClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch (error) {
+            // The `set` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+        remove(name: string, options: CookieOptions) {
+          try {
+            cookieStore.set({ name, value: "", ...options })
+          } catch (error) {
+            // The `delete` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+      },
+    },
+  )
 }
 
-// Helper function to get user on server (for API routes)
-export async function getServerUser() {
-  try {
-    const supabase = createSupabaseServer()
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser()
+// Backward compatibility export
+export default createClient
 
-    if (error) {
-      console.error("Error getting server user:", error)
-      return null
-    }
-
-    return user
-  } catch (error) {
-    console.error("Failed to create server client:", error)
-    return null
-  }
-}
-
-// Add this export for backward compatibility
-export { createSupabaseServer as createServerClient }
+// Also export the client creation function with the old name
+export const createSupabaseServerClient = createClient
