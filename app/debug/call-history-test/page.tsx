@@ -1,9 +1,32 @@
 "use client"
 
-import { useState } from "react"
-import CallHistoryClient from "@/components/call-history/call-history-client"
+import { useState, Suspense } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import dynamic from "next/dynamic"
+
+// Dynamically import the CallHistoryClient to avoid SSR issues
+const CallHistoryClient = dynamic(
+  () => import("@/components/call-history/call-history-client").then((mod) => ({ default: mod.CallHistoryClient })),
+  {
+    loading: () => (
+      <Card>
+        <CardHeader>
+          <CardTitle>Loading Call History...</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {[...Array(3)].map((_, i) => (
+              <Skeleton key={i} className="h-16 w-full" />
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    ),
+    ssr: false,
+  },
+)
 
 export default function CallHistoryTestPage() {
   const [testScenario, setTestScenario] = useState<string>("normal")
@@ -22,7 +45,7 @@ export default function CallHistoryTestPage() {
           <CardTitle>Call History Test Suite</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-2 mb-4">
+          <div className="flex gap-2 mb-4 flex-wrap">
             {testCases.map((test) => (
               <Button
                 key={test.id}
@@ -42,7 +65,24 @@ export default function CallHistoryTestPage() {
         </CardContent>
       </Card>
 
-      <CallHistoryClient phoneNumber={testCases.find((t) => t.id === testScenario)?.phone || ""} />
+      <Suspense
+        fallback={
+          <Card>
+            <CardHeader>
+              <CardTitle>Loading Call History Component...</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-20 w-full" />
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        }
+      >
+        <CallHistoryClient phoneNumber={testCases.find((t) => t.id === testScenario)?.phone || ""} />
+      </Suspense>
     </div>
   )
 }

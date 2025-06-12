@@ -347,3 +347,5 @@ export function CallHistoryClient({ phoneNumber }: { phoneNumber?: string }) {
     </div>
   )
 }
+
+export default CallHistoryClient
