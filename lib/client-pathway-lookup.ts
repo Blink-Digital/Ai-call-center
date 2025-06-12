@@ -1,7 +1,8 @@
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
-import type { Database } from "@/types/supabase"
+import { useSupabaseBrowser } from "@/lib/supabase-browser" // ✅ Import singleton
 
 export async function lookupPathwayIdClientSide(phoneNumber: string) {
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
+
   try {
     // Early validation
     if (!phoneNumber || phoneNumber === "undefined" || phoneNumber === "null") {
@@ -10,8 +11,6 @@ export async function lookupPathwayIdClientSide(phoneNumber: string) {
     }
 
     console.log("[CLIENT-LOOKUP] 🔍 Looking up pathway for phone:", phoneNumber)
-
-    const supabase = createClientComponentClient<Database>()
 
     // Get current session with proper error handling
     const {
@@ -70,6 +69,8 @@ export async function lookupPathwayIdClientSide(phoneNumber: string) {
 
 // Backup direct Supabase method (for cases where API route isn't available)
 export async function lookupPathwayIdDirectSupabase(phoneNumber: string) {
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
+
   try {
     // Early validation
     if (!phoneNumber || phoneNumber === "undefined" || phoneNumber === "null") {
@@ -78,8 +79,6 @@ export async function lookupPathwayIdDirectSupabase(phoneNumber: string) {
     }
 
     console.log("[CLIENT-LOOKUP-DIRECT] 🔍 Direct Supabase lookup for phone:", phoneNumber)
-
-    const supabase = createClientComponentClient<Database>()
 
     // Get current user
     const {

@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react"
 import { useSupabaseBrowser } from "@/lib/supabase-browser"
-import { useRouter } from "next/navigation"
+import { useRouter, usePathname } from "next/navigation"
 
 export interface User {
   id: string
@@ -38,8 +38,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const isAuthenticated = !!user
   const initializedRef = useRef(false)
+  const isLoggingInRef = useRef(false) // Track if we're in the middle of a login
   const supabase = useSupabaseBrowser()
   const router = useRouter()
+  const pathname = usePathname()
 
   // ✅ Simple session refresh without complex sync
   const refreshSession = async () => {
@@ -91,11 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session check
     refreshSession()
 
-    // ✅ Set up auth state listener
+    // ✅ Set up auth state listener with smarter redirect logic
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("🔄 [AUTH-CONTEXT] Auth state change:", event, session?.user?.id)
+      console.log("🔄 [AUTH-CONTEXT] Current pathname:", pathname)
+      console.log("🔄 [AUTH-CONTEXT] Is logging in:", isLoggingInRef.current)
 
       if (event === "SIGNED_IN" && session?.user) {
         console.log("✅ [AUTH-CONTEXT] User signed in, updating context...")
@@ -106,13 +110,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         setLoading(false)
 
-        // ✅ Simple redirect after successful login
-        console.log("🔄 [AUTH-CONTEXT] Redirecting to dashboard...")
-        router.push("/dashboard")
+        // ✅ CRITICAL: Only redirect if we're actually logging in from login page
+        if (isLoggingInRef.current || pathname === "/login") {
+          console.log("🔄 [AUTH-CONTEXT] Redirecting to dashboard after login...")
+          router.push("/dashboard")
+          isLoggingInRef.current = false
+        } else {
+          console.log("🔄 [AUTH-CONTEXT] Session validated, staying on current page:", pathname)
+        }
       } else if (event === "SIGNED_OUT") {
         console.log("🔄 [AUTH-CONTEXT] User signed out, clearing context...")
         setUser(null)
         setLoading(false)
+        isLoggingInRef.current = false
         router.push("/login")
       } else if (event === "INITIAL_SESSION") {
         if (session?.user) {
@@ -143,12 +153,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("🧹 [AUTH-CONTEXT] Cleaning up auth context...")
       subscription.unsubscribe()
       initializedRef.current = false
+      isLoggingInRef.current = false
     }
-  }, [supabase, router])
+  }, [supabase, router, pathname])
 
   const login = async (email: string, password: string) => {
     try {
       console.log("🔄 [AUTH-CONTEXT] Starting login for:", email)
+      isLoggingInRef.current = true // Mark that we're logging in
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -157,10 +169,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (error) {
         console.error("❌ [AUTH-CONTEXT] Login error:", error)
+        isLoggingInRef.current = false
         return { success: false, message: error.message }
       }
 
       if (!data.user || !data.session) {
+        isLoggingInRef.current = false
         return { success: false, message: "Login failed - no user data received" }
       }
 
@@ -170,6 +184,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { success: true, message: "Login successful" }
     } catch (error: any) {
       console.error("❌ [AUTH-CONTEXT] Unexpected login error:", error)
+      isLoggingInRef.current = false
       return { success: false, message: error.message || "An unexpected error occurred" }
     }
   }
@@ -209,9 +224,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("Error signing out:", error)
       }
       setUser(null)
+      isLoggingInRef.current = false
     } catch (err) {
       console.error("Logout error:", err)
       setUser(null)
+      isLoggingInRef.current = false
     }
   }
 

@@ -1,395 +1,349 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { useSupabaseBrowser } from "@/lib/supabase-browser" // ✅ Import singleton
+import { useUserCallData } from "@/hooks/use-user-call-data"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Phone, Clock, User, MessageSquare, ExternalLink, Search, Calendar } from "lucide-react"
-import { useAuth } from "@/contexts/auth-context" // ✅ Use modern auth context
-import { toast } from "@/components/ui/use-toast"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Badge } from "@/components/ui/badge"
+import { Phone, RefreshCcw, Download, Clock, Calendar } from "lucide-react"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-interface CallRecord {
-  call_id: string
-  to: string
-  from: string
-  call_length: number
-  call_successful: boolean
-  created_at: string
-  ended_reason: string
-  summary?: string
-  transcript?: string
-  recording_url?: string
-  pathway_id?: string
-  corrected_duration?: number
-  variables?: Record<string, any>
-}
+export function CallHistoryClient({ phoneNumber }: { phoneNumber?: string }) {
+  const [selectedPhoneNumber, setSelectedPhoneNumber] = useState<string | undefined>(phoneNumber)
+  const [phoneNumbers, setPhoneNumbers] = useState<any[]>([])
+  const [loadingPhoneNumbers, setLoadingPhoneNumbers] = useState(true)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
 
-interface CallHistoryClientProps {
-  initialCalls?: CallRecord[]
-}
+  // Fetch call data using the hook
+  const { calls, loading, error, total, refetch } = useUserCallData({
+    phoneNumber: selectedPhoneNumber,
+    page,
+    pageSize,
+  })
 
-function CallHistoryClient({ initialCalls = [] }: CallHistoryClientProps) {
-  // ✅ Use modern auth context instead of manual Supabase client
-  const { user, loading: authLoading } = useAuth()
-
-  const [calls, setCalls] = useState<CallRecord[]>(initialCalls)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
-  const [selectedCall, setSelectedCall] = useState<CallRecord | null>(null)
-  const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null)
-
-  const fetchCalls = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch("/api/bland-ai/call-history", {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        throw new Error(`Failed to fetch calls: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.success && Array.isArray(data.calls)) {
-        setCalls(data.calls)
-      } else {
-        throw new Error(data.error || "Invalid response format")
-      }
-    } catch (error) {
-      console.error("Error fetching calls:", error)
-      setError(error instanceof Error ? error.message : "Failed to fetch calls")
-      toast({
-        title: "Error loading calls",
-        description: error instanceof Error ? error.message : "Failed to fetch calls",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const analyzeCall = async (callId: string) => {
-    setIsAnalyzing(callId)
-
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch(`/api/bland-ai/calls/${callId}/analyze`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        throw new Error(`Failed to analyze call: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.success) {
-        // Update the call in the list with the new analysis
-        setCalls((prevCalls) =>
-          prevCalls.map((call) =>
-            call.call_id === callId ? { ...call, summary: data.summary, variables: data.variables } : call,
-          ),
-        )
-
-        toast({
-          title: "Analysis complete",
-          description: "Call has been analyzed successfully.",
-        })
-      } else {
-        throw new Error(data.error || "Analysis failed")
-      }
-    } catch (error) {
-      console.error("Error analyzing call:", error)
-      toast({
-        title: "Analysis failed",
-        description: error instanceof Error ? error.message : "Failed to analyze call",
-        variant: "destructive",
-      })
-    } finally {
-      setIsAnalyzing(null)
-    }
-  }
-
-  const filteredCalls = calls.filter(
-    (call) =>
-      call.to.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      call.from.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      call.call_id.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
-
-  const formatDuration = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, "0")}`
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString()
-  }
-
-  const getStatusBadge = (call: CallRecord) => {
-    if (call.call_successful) {
-      return (
-        <Badge variant="default" className="bg-green-100 text-green-800">
-          Completed
-        </Badge>
-      )
-    } else {
-      return <Badge variant="destructive">Failed</Badge>
-    }
-  }
-
-  // ✅ Fetch calls when component mounts and user is authenticated
+  // Fetch user's phone numbers
   useEffect(() => {
-    if (user && !authLoading && initialCalls.length === 0) {
-      fetchCalls()
-    }
-  }, [user, authLoading])
+    async function fetchPhoneNumbers() {
+      try {
+        setLoadingPhoneNumbers(true)
 
-  return (
-    <div className="space-y-6">
-      {/* Header with Search and Refresh */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Call History</h2>
-          <p className="text-gray-600">View and analyze your recent calls</p>
-        </div>
-        <div className="flex gap-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              placeholder="Search calls..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 w-64"
-            />
-          </div>
-          <Button onClick={fetchCalls} disabled={loading}>
-            {loading ? "Loading..." : "Refresh"}
+        // Get current user
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) {
+          console.error("No authenticated user found")
+          return
+        }
+
+        // Fetch phone numbers from database
+        const { data, error } = await supabase
+          .from("phone_numbers")
+          .select("*")
+          .eq("user_id", user.id)
+          .in("status", ["active", "purchased"])
+          .order("created_at", { ascending: false })
+
+        if (error) {
+          console.error("Error fetching phone numbers:", error)
+          return
+        }
+
+        setPhoneNumbers(data || [])
+
+        // If no phone number is selected and we have numbers, select the first one
+        if (!selectedPhoneNumber && data && data.length > 0) {
+          setSelectedPhoneNumber(data[0].number)
+        }
+      } catch (err) {
+        console.error("Error in fetchPhoneNumbers:", err)
+      } finally {
+        setLoadingPhoneNumbers(false)
+      }
+    }
+
+    fetchPhoneNumbers()
+  }, [supabase, selectedPhoneNumber])
+
+  // Format duration from seconds to MM:SS
+  const formatDuration = (seconds: number) => {
+    if (!seconds) return "00:00"
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+  }
+
+  // Format date to local date and time
+  const formatDate = (dateString: string) => {
+    if (!dateString) return ""
+    const date = new Date(dateString)
+    return date.toLocaleString()
+  }
+
+  // Handle phone number change
+  const handlePhoneNumberChange = (value: string) => {
+    setSelectedPhoneNumber(value)
+    setPage(1) // Reset to first page when changing phone number
+  }
+
+  // Handle page size change
+  const handlePageSizeChange = (value: string) => {
+    setPageSize(Number.parseInt(value))
+    setPage(1) // Reset to first page when changing page size
+  }
+
+  // Calculate total pages
+  const totalPages = Math.ceil(total / pageSize)
+
+  // Handle pagination
+  const goToNextPage = () => {
+    if (page < totalPages) {
+      setPage(page + 1)
+    }
+  }
+
+  const goToPrevPage = () => {
+    if (page > 1) {
+      setPage(page - 1)
+    }
+  }
+
+  // Get status badge color
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case "complete":
+      case "completed":
+        return "bg-green-500"
+      case "failed":
+      case "error":
+        return "bg-red-500"
+      case "in-progress":
+      case "in_progress":
+      case "inprogress":
+        return "bg-blue-500"
+      case "queued":
+      case "waiting":
+        return "bg-yellow-500"
+      default:
+        return "bg-gray-500"
+    }
+  }
+
+  // If no phone numbers are available
+  if (!loadingPhoneNumbers && phoneNumbers.length === 0) {
+    return (
+      <div className="space-y-4">
+        <Alert variant="warning" className="bg-yellow-50 border-yellow-200">
+          <AlertTitle className="text-yellow-800">No Phone Number Found</AlertTitle>
+          <AlertDescription className="text-yellow-700">
+            You need to purchase a phone number to start making calls and see call history.
+          </AlertDescription>
+        </Alert>
+        <div className="flex justify-center">
+          <Button onClick={() => (window.location.href = "/dashboard/phone-numbers/purchase")}>
+            Purchase Phone Number
           </Button>
         </div>
       </div>
+    )
+  }
 
-      {/* Error State */}
-      {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-red-800">
-              <span className="font-medium">Error:</span>
-              <span>{error}</span>
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center gap-2">
+          <Phone className="h-5 w-5 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">
+            {selectedPhoneNumber ? `Showing calls from: ${selectedPhoneNumber}` : "Select a phone number"}
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+          {phoneNumbers.length > 1 && (
+            <Select value={selectedPhoneNumber} onValueChange={handlePhoneNumberChange} disabled={loadingPhoneNumbers}>
+              <SelectTrigger className="w-full sm:w-[200px]">
+                <SelectValue placeholder="Select phone number" />
+              </SelectTrigger>
+              <SelectContent>
+                {phoneNumbers.map((phone) => (
+                  <SelectItem key={phone.id} value={phone.number}>
+                    {phone.number}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="icon" onClick={() => refetch()} disabled={loading}>
+              <RefreshCcw className="h-4 w-4" />
+            </Button>
+
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => {
+                // Export call history as CSV
+                if (!calls.length) return
+
+                const headers = ["ID", "Date", "Time", "From", "To", "Duration", "Status"]
+                const csvContent = [
+                  headers.join(","),
+                  ...calls.map((call) =>
+                    [
+                      call.id,
+                      new Date(call.start_time).toLocaleDateString(),
+                      new Date(call.start_time).toLocaleTimeString(),
+                      call.from_number,
+                      call.to_number,
+                      formatDuration(call.duration),
+                      call.status,
+                    ].join(","),
+                  ),
+                ].join("\n")
+
+                const blob = new Blob([csvContent], { type: "text/csv" })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement("a")
+                a.href = url
+                a.download = `call-history-${new Date().toISOString().split("T")[0]}.csv`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                URL.revokeObjectURL(url)
+              }}
+              disabled={!calls.length}
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTitle>Error loading call history</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : loading ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Call History</CardTitle>
+            <CardDescription>Loading your call history...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-[250px]" />
+                    <Skeleton className="h-3 w-[200px]" />
+                  </div>
+                  <Skeleton className="h-6 w-[80px]" />
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
-      )}
-
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center p-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        </div>
-      )}
-
-      {/* Calls List */}
-      {!loading && (
-        <div className="grid gap-4">
-          {filteredCalls.length === 0 ? (
-            <Card>
-              <CardContent className="pt-6">
-                <div className="text-center text-gray-500">
-                  {searchTerm ? "No calls found matching your search." : "No calls found."}
+      ) : (
+        <>
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Phone className="h-5 w-5" />
+                    Call History
+                  </CardTitle>
+                  <CardDescription>
+                    {total} total calls • Page {page} of {totalPages || 1} • Updated {new Date().toLocaleTimeString()}
+                  </CardDescription>
                 </div>
-              </CardContent>
-            </Card>
-          ) : (
-            filteredCalls.map((call) => (
-              <Card key={call.call_id} className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Phone className="h-4 w-4" />
-                        {call.to}
-                        {getStatusBadge(call)}
-                      </CardTitle>
-                      <CardDescription>Call ID: {call.call_id}</CardDescription>
-                    </div>
-                    <div className="flex gap-2">
-                      {!call.summary && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => analyzeCall(call.call_id)}
-                          disabled={isAnalyzing === call.call_id}
-                        >
-                          {isAnalyzing === call.call_id ? "Analyzing..." : "Analyze"}
-                        </Button>
-                      )}
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button size="sm" variant="outline" onClick={() => setSelectedCall(call)}>
-                            View Details
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                          <DialogHeader>
-                            <DialogTitle>Call Details</DialogTitle>
-                            <DialogDescription>Detailed information for call {call.call_id}</DialogDescription>
-                          </DialogHeader>
-                          {selectedCall && (
-                            <div className="space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                  <Label className="text-sm font-medium">To</Label>
-                                  <p className="text-sm">{selectedCall.to}</p>
+                <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                  <SelectTrigger className="w-[100px]">
+                    <SelectValue placeholder="Per page" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10 per page</SelectItem>
+                    <SelectItem value="20">20 per page</SelectItem>
+                    <SelectItem value="50">50 per page</SelectItem>
+                    <SelectItem value="100">100 per page</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {calls.length === 0 ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center">
+                  <Phone className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium">No calls found</h3>
+                  <p className="text-muted-foreground mt-2">No calls have been made from this number yet.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="rounded-md border overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[180px]">Date & Time</TableHead>
+                          <TableHead>From</TableHead>
+                          <TableHead>To</TableHead>
+                          <TableHead className="w-[100px]">Duration</TableHead>
+                          <TableHead className="w-[100px]">Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {calls.map((call) => (
+                          <TableRow key={call.id}>
+                            <TableCell className="font-medium">
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3 text-muted-foreground" />
+                                  <span>{new Date(call.start_time).toLocaleDateString()}</span>
                                 </div>
-                                <div>
-                                  <Label className="text-sm font-medium">From</Label>
-                                  <p className="text-sm">{selectedCall.from}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Duration</Label>
-                                  <p className="text-sm">{formatDuration(selectedCall.call_length)}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Status</Label>
-                                  <p className="text-sm">{selectedCall.call_successful ? "Successful" : "Failed"}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">Date</Label>
-                                  <p className="text-sm">{formatDate(selectedCall.created_at)}</p>
-                                </div>
-                                <div>
-                                  <Label className="text-sm font-medium">End Reason</Label>
-                                  <p className="text-sm">{selectedCall.ended_reason}</p>
+                                <div className="flex items-center gap-1 text-muted-foreground">
+                                  <Clock className="h-3 w-3" />
+                                  <span>{new Date(call.start_time).toLocaleTimeString()}</span>
                                 </div>
                               </div>
-
-                              {selectedCall.summary && (
-                                <div>
-                                  <Label className="text-sm font-medium">Summary</Label>
-                                  <Textarea value={selectedCall.summary} readOnly className="mt-1" rows={3} />
-                                </div>
-                              )}
-
-                              {selectedCall.transcript && (
-                                <div>
-                                  <Label className="text-sm font-medium">Transcript</Label>
-                                  <Textarea value={selectedCall.transcript} readOnly className="mt-1" rows={6} />
-                                </div>
-                              )}
-
-                              {selectedCall.variables && Object.keys(selectedCall.variables).length > 0 && (
-                                <div>
-                                  <Label className="text-sm font-medium">Variables</Label>
-                                  <pre className="text-xs bg-gray-50 p-2 rounded mt-1 overflow-auto">
-                                    {JSON.stringify(selectedCall.variables, null, 2)}
-                                  </pre>
-                                </div>
-                              )}
-
-                              {selectedCall.recording_url && (
-                                <div>
-                                  <Label className="text-sm font-medium">Recording</Label>
-                                  <div className="mt-1">
-                                    <Button size="sm" variant="outline" asChild>
-                                      <a href={selectedCall.recording_url} target="_blank" rel="noopener noreferrer">
-                                        <ExternalLink className="h-4 w-4 mr-2" />
-                                        Listen to Recording
-                                      </a>
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </DialogContent>
-                      </Dialog>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-4 text-sm text-gray-600">
-                    <div className="flex items-center gap-1">
-                      <Clock className="h-4 w-4" />
-                      {formatDuration(call.call_length)}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="h-4 w-4" />
-                      {formatDate(call.created_at)}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <User className="h-4 w-4" />
-                      From: {call.from}
-                    </div>
+                            </TableCell>
+                            <TableCell>{call.from_number || "Unknown"}</TableCell>
+                            <TableCell>{call.to_number || "Unknown"}</TableCell>
+                            <TableCell>{formatDuration(call.duration)}</TableCell>
+                            <TableCell>
+                              <Badge className={getStatusColor(call.status)}>{call.status || "Unknown"}</Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
 
-                  {call.summary && (
-                    <div className="mt-3 p-3 bg-gray-50 rounded-md">
-                      <div className="flex items-center gap-2 mb-2">
-                        <MessageSquare className="h-4 w-4" />
-                        <span className="font-medium text-sm">Summary</span>
-                      </div>
-                      <p className="text-sm text-gray-700">{call.summary}</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Auth Required State */}
-      {!user && !authLoading && (
-        <div className="flex items-center justify-center p-8">
-          <div className="text-center">
-            <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
-            <p className="text-gray-600">Please log in to view call history.</p>
-          </div>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {authLoading && (
-        <div className="flex items-center justify-center p-8">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading call history...</p>
-          </div>
-        </div>
+                  {/* Pagination */}
+                  <div className="flex items-center justify-between mt-4">
+                    <Button variant="outline" onClick={goToPrevPage} disabled={page <= 1}>
+                      Previous
+                    </Button>
+                    <span className="text-sm text-muted-foreground">
+                      Page {page} of {totalPages || 1}
+                    </span>
+                    <Button variant="outline" onClick={goToNextPage} disabled={page >= totalPages}>
+                      Next
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </>
       )}
     </div>
   )
 }
-
-export default CallHistoryClient

@@ -1,445 +1,340 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { useSupabaseBrowser } from "@/lib/supabase-browser" // ✅ Import singleton
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Users, UserPlus, Edit, Save, X } from "lucide-react"
-import { useAuth } from "@/contexts/auth-context" // ✅ Use modern auth context
-import { toast } from "@/components/ui/use-toast"
-import { TeamMembersList } from "./team-members-list"
-import { TeamPathwaysList } from "./team-pathways-list"
-import { InviteMemberDialog } from "./invite-member-dialog"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useRouter } from "next/navigation"
+import { TeamMembersList } from "@/components/teams/team-members-list"
+import { TeamPathwaysList } from "@/components/teams/team-pathways-list"
+import { InviteMemberDialog } from "@/components/teams/invite-member-dialog"
+import { ArrowLeft, UserPlus } from "lucide-react"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-interface TeamMember {
-  id: string
-  email: string
-  role: "owner" | "admin" | "member"
-  joined_at: string
-  user_id: string
-}
-
-interface TeamPathway {
-  id: string
-  name: string
-  description: string | null
-  phone_number: string
-  created_at: string
-  last_deployed_at: string | null
-}
-
-interface TeamDetailClientProps {
-  teamId: string
-  initialTeam?: {
-    id: string
-    name: string
-    description: string | null
-    created_at: string
-    role: "owner" | "admin" | "member"
-  }
-  initialMembers?: TeamMember[]
-  initialPathways?: TeamPathway[]
-}
-
-export function TeamDetailClient({
-  teamId,
-  initialTeam,
-  initialMembers = [],
-  initialPathways = [],
-}: TeamDetailClientProps) {
-  // ✅ Use modern auth context instead of manual Supabase client
-  const { user, loading: authLoading } = useAuth()
-  const router = useRouter()
-
-  const [team, setTeam] = useState(initialTeam)
-  const [members, setMembers] = useState<TeamMember[]>(initialMembers)
-  const [pathways, setPathways] = useState<TeamPathway[]>(initialPathways)
-  const [loading, setLoading] = useState(false)
+export function TeamDetailClient({ teamId }: { teamId: string }) {
+  const [team, setTeam] = useState<any>(null)
+  const [members, setMembers] = useState<any[]>([])
+  const [pathways, setPathways] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isEditing, setIsEditing] = useState(false)
-  const [editForm, setEditForm] = useState({
-    name: initialTeam?.name || "",
-    description: initialTeam?.description || "",
-  })
-  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false)
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const router = useRouter()
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
 
-  const canEdit = team?.role === "owner" || team?.role === "admin"
-  const canManageMembers = team?.role === "owner" || team?.role === "admin"
-
-  // ✅ Fetch team data when component mounts and user is authenticated
   useEffect(() => {
-    if (user && !authLoading && !initialTeam) {
-      fetchTeamData()
+    async function loadTeamData() {
+      try {
+        setLoading(true)
+        setError(null)
+
+        // Get current user
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
+
+        if (userError) {
+          console.error("Error getting user:", userError)
+          setError("Authentication error. Please try logging in again.")
+          return
+        }
+
+        if (!user) {
+          console.error("No user found")
+          setError("No authenticated user found. Please log in.")
+          return
+        }
+
+        // Fetch team details
+        const { data: teamData, error: teamError } = await supabase.from("teams").select("*").eq("id", teamId).single()
+
+        if (teamError) {
+          console.error("Error fetching team:", teamError)
+          setError("Failed to load team details. Please try again later.")
+          return
+        }
+
+        setTeam(teamData)
+
+        // Fetch team members with user profiles
+        const { data: membersData, error: membersError } = await supabase
+          .from("team_members")
+          .select(`
+            id, 
+            role, 
+            created_at,
+            user_id,
+            users:user_id (
+              email,
+              id
+            )
+          `)
+          .eq("team_id", teamId)
+
+        if (membersError) {
+          console.error("Error fetching team members:", membersError)
+          setError("Failed to load team members. Please try again later.")
+          return
+        }
+
+        setMembers(membersData || [])
+
+        // Find current user's role in the team
+        const currentMember = membersData?.find((m) => m.user_id === user.id)
+        setCurrentUserRole(currentMember?.role || null)
+
+        // If user is not a member of this team, redirect to teams page
+        if (!currentMember) {
+          console.error("User is not a member of this team")
+          setError("You do not have access to this team.")
+          router.push("/dashboard/teams")
+          return
+        }
+
+        // Fetch team pathways
+        const { data: pathwaysData, error: pathwaysError } = await supabase
+          .from("pathways")
+          .select("*")
+          .eq("team_id", teamId)
+
+        if (pathwaysError) {
+          console.error("Error fetching team pathways:", pathwaysError)
+          setError("Failed to load team pathways. Please try again later.")
+          return
+        }
+
+        setPathways(pathwaysData || [])
+      } catch (error) {
+        console.error("Error loading team data:", error)
+        setError("An unexpected error occurred. Please try again later.")
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [user, authLoading, teamId])
 
-  const fetchTeamData = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch(`/api/teams/${teamId}`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        if (response.status === 404) {
-          throw new Error("Team not found.")
-        }
-        throw new Error(`Failed to fetch team data: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.success) {
-        setTeam(data.team)
-        setMembers(data.members || [])
-        setPathways(data.pathways || [])
-        setEditForm({
-          name: data.team.name,
-          description: data.team.description || "",
-        })
-      } else {
-        throw new Error(data.error || "Failed to fetch team data")
-      }
-    } catch (error) {
-      console.error("Error fetching team data:", error)
-      setError(error instanceof Error ? error.message : "Failed to fetch team data")
-      toast({
-        title: "Error loading team",
-        description: error instanceof Error ? error.message : "Failed to fetch team data",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
+    if (teamId) {
+      loadTeamData()
     }
-  }
+  }, [teamId, supabase, router])
 
-  const handleUpdateTeam = async () => {
+  const handleInviteMember = async (email: string, role: string) => {
     try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch(`/api/teams/${teamId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(editForm),
-        credentials: "include", // ✅ Include cookies for authentication
-      })
+      // Get current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        throw new Error(`Failed to update team: ${response.status}`)
+      if (!user) {
+        console.error("No user found")
+        return
       }
 
-      const data = await response.json()
+      // Check if user has admin permissions
+      if (currentUserRole !== "admin") {
+        console.error("User does not have admin permissions")
+        return
+      }
 
-      if (data.success) {
-        setTeam(data.team)
-        setIsEditing(false)
-        toast({
-          title: "Team updated",
-          description: "Team information has been updated successfully.",
-        })
+      // Find user by email
+      const { data: userData, error: userError } = await supabase.from("users").select("id").eq("email", email).single()
+
+      if (userError) {
+        console.error("Error finding user by email:", userError)
+        return
+      }
+
+      // Check if user is already a member
+      const existingMember = members.find((m) => m.user_id === userData.id)
+      if (existingMember) {
+        console.error("User is already a member of this team")
+        return
+      }
+
+      // Add user to team
+      const { error: memberError } = await supabase.from("team_members").insert({
+        team_id: teamId,
+        user_id: userData.id,
+        role,
+      })
+
+      if (memberError) {
+        console.error("Error adding team member:", memberError)
+        return
+      }
+
+      // Update local state
+      const { data: newMember, error: fetchError } = await supabase
+        .from("team_members")
+        .select(`
+          id, 
+          role, 
+          created_at,
+          user_id,
+          users:user_id (
+            email,
+            id
+          )
+        `)
+        .eq("team_id", teamId)
+        .eq("user_id", userData.id)
+        .single()
+
+      if (fetchError) {
+        console.error("Error fetching new member:", fetchError)
       } else {
-        throw new Error(data.error || "Failed to update team")
+        setMembers([...members, newMember])
       }
+
+      setIsInviteDialogOpen(false)
     } catch (error) {
-      console.error("Error updating team:", error)
-      toast({
-        title: "Error updating team",
-        description: error instanceof Error ? error.message : "Failed to update team",
-        variant: "destructive",
-      })
+      console.error("Error in handleInviteMember:", error)
     }
   }
 
   const handleRemoveMember = async (memberId: string) => {
-    if (!confirm("Are you sure you want to remove this member from the team?")) {
-      return
-    }
-
     try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch(`/api/teams/${teamId}/members/${memberId}`, {
-        method: "DELETE",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        throw new Error(`Failed to remove member: ${response.status}`)
+      // Check if user has admin permissions
+      if (currentUserRole !== "admin") {
+        console.error("User does not have admin permissions")
+        return
       }
 
-      const data = await response.json()
+      // Remove member from team
+      const { error } = await supabase.from("team_members").delete().eq("id", memberId)
 
-      if (data.success) {
-        setMembers((prev) => prev.filter((member) => member.id !== memberId))
-        toast({
-          title: "Member removed",
-          description: "Member has been removed from the team.",
-        })
-      } else {
-        throw new Error(data.error || "Failed to remove member")
+      if (error) {
+        console.error("Error removing team member:", error)
+        return
       }
+
+      // Update local state
+      setMembers(members.filter((m) => m.id !== memberId))
     } catch (error) {
-      console.error("Error removing member:", error)
-      toast({
-        title: "Error removing member",
-        description: error instanceof Error ? error.message : "Failed to remove member",
-        variant: "destructive",
-      })
+      console.error("Error in handleRemoveMember:", error)
     }
   }
 
-  const handleUpdateMemberRole = async (memberId: string, newRole: string) => {
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch(`/api/teams/${teamId}/members/${memberId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ role: newRole }),
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
-        }
-        throw new Error(`Failed to update member role: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      if (data.success) {
-        setMembers((prev) =>
-          prev.map((member) =>
-            member.id === memberId ? { ...member, role: newRole as "owner" | "admin" | "member" } : member,
-          ),
-        )
-        toast({
-          title: "Role updated",
-          description: "Member role has been updated successfully.",
-        })
-      } else {
-        throw new Error(data.error || "Failed to update member role")
-      }
-    } catch (error) {
-      console.error("Error updating member role:", error)
-      toast({
-        title: "Error updating role",
-        description: error instanceof Error ? error.message : "Failed to update member role",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // ✅ Show loading state while auth is loading
-  if (authLoading) {
+  if (loading) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading team details...</p>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Button variant="ghost" size="icon">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <Skeleton className="h-8 w-[200px]" />
         </div>
+        <Skeleton className="h-6 w-[300px] mb-4" />
+        <Tabs defaultValue="members">
+          <TabsList>
+            <TabsTrigger value="members">Members</TabsTrigger>
+            <TabsTrigger value="pathways">Pathways</TabsTrigger>
+          </TabsList>
+          <TabsContent value="members" className="mt-4">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <Skeleton className="h-6 w-[150px]" />
+                  <Skeleton className="h-10 w-[150px]" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="flex justify-between items-center py-3 border-b">
+                    <div>
+                      <Skeleton className="h-5 w-[200px] mb-1" />
+                      <Skeleton className="h-4 w-[100px]" />
+                    </div>
+                    <Skeleton className="h-9 w-[100px]" />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     )
   }
 
-  // ✅ Show auth required state
-  if (!user) {
+  if (error) {
     return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
-          <p className="text-gray-600">Please log in to view team details.</p>
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-4">
+          <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/teams")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h2 className="text-2xl font-bold">Team Error</h2>
         </div>
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-800">Error Loading Team</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-red-700">{error}</p>
+            <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     )
-  }
-
-  if (!team) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Team Not Found</h2>
-          <p className="text-gray-600 mb-4">
-            The team you're looking for doesn't exist or you don't have access to it.
-          </p>
-          <Button onClick={() => router.push("/dashboard/teams")}>Back to Teams</Button>
-        </div>
-      </div>
-    )
-  }
-
-  const getRoleBadge = (role: string) => {
-    switch (role) {
-      case "owner":
-        return (
-          <Badge variant="default" className="bg-purple-100 text-purple-800">
-            Owner
-          </Badge>
-        )
-      case "admin":
-        return (
-          <Badge variant="default" className="bg-blue-100 text-blue-800">
-            Admin
-          </Badge>
-        )
-      case "member":
-        return <Badge variant="secondary">Member</Badge>
-      default:
-        return <Badge variant="secondary">{role}</Badge>
-    }
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Users className="h-8 w-8 text-blue-600" />
-          <div>
-            <h1 className="text-2xl font-bold">{team.name}</h1>
-            <div className="flex items-center gap-2">
-              {getRoleBadge(team.role)}
-              <span className="text-sm text-gray-500">
-                {members.length} member{members.length !== 1 ? "s" : ""}
-              </span>
-            </div>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {canManageMembers && (
-            <Button onClick={() => setInviteDialogOpen(true)}>
-              <UserPlus className="h-4 w-4 mr-2" />
-              Invite Member
-            </Button>
-          )}
-          {canEdit && (
-            <Button variant="outline" onClick={() => setIsEditing(true)}>
-              <Edit className="h-4 w-4 mr-2" />
-              Edit Team
-            </Button>
-          )}
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 mb-4">
+        <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/teams")}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <h2 className="text-2xl font-bold">{team.name}</h2>
       </div>
+      <p className="text-muted-foreground">{team.description || "No description provided"}</p>
 
-      {/* Error State */}
-      {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-red-800">
-              <span className="font-medium">Error:</span>
-              <span>{error}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Team Info */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Team Information</CardTitle>
-          <CardDescription>Created on {new Date(team.created_at).toLocaleDateString()}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isEditing ? (
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="name">Team Name</Label>
-                <Input
-                  id="name"
-                  value={editForm.name}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
-                  placeholder="Enter team name"
-                />
+      <Tabs defaultValue="members">
+        <TabsList>
+          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="pathways">Pathways</TabsTrigger>
+        </TabsList>
+        <TabsContent value="members" className="mt-4">
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <CardTitle>Team Members</CardTitle>
+                {currentUserRole === "admin" && (
+                  <Button onClick={() => setIsInviteDialogOpen(true)}>
+                    <UserPlus className="mr-2 h-4 w-4" /> Invite Member
+                  </Button>
+                )}
               </div>
-              <div>
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  value={editForm.description}
-                  onChange={(e) => setEditForm((prev) => ({ ...prev, description: e.target.value }))}
-                  placeholder="Enter team description"
-                  rows={3}
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button onClick={handleUpdateTeam}>
-                  <Save className="h-4 w-4 mr-2" />
-                  Save Changes
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setIsEditing(false)
-                    setEditForm({
-                      name: team.name,
-                      description: team.description || "",
-                    })
-                  }}
-                >
-                  <X className="h-4 w-4 mr-2" />
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <h3 className="font-medium mb-2">{team.name}</h3>
-              {team.description ? (
-                <p className="text-gray-600">{team.description}</p>
-              ) : (
-                <p className="text-gray-400 italic">No description provided</p>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              <CardDescription>Manage team members and their permissions</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TeamMembersList
+                members={members}
+                currentUserRole={currentUserRole}
+                onRemoveMember={handleRemoveMember}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="pathways" className="mt-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Team Pathways</CardTitle>
+              <CardDescription>Call flows shared with this team</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <TeamPathwaysList pathways={pathways} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
-      {/* Members */}
-      <TeamMembersList
-        members={members}
-        currentUserRole={team.role}
-        onRemoveMember={handleRemoveMember}
-        onUpdateRole={handleUpdateMemberRole}
-      />
-
-      {/* Pathways */}
-      <TeamPathwaysList pathways={pathways} teamRole={team.role} />
-
-      {/* Invite Dialog */}
       <InviteMemberDialog
-        open={inviteDialogOpen}
-        onOpenChange={setInviteDialogOpen}
-        teamId={teamId}
-        onInviteSent={() => {
-          setInviteDialogOpen(false)
-          // Refresh team data to get updated member list
-          fetchTeamData()
-        }}
+        open={isInviteDialogOpen}
+        onOpenChange={setIsInviteDialogOpen}
+        onInviteMember={handleInviteMember}
       />
     </div>
   )

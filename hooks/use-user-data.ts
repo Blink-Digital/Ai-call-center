@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useSupabaseBrowser } from "@/lib/supabase-browser"
 
@@ -30,33 +30,82 @@ export function useUserPhoneNumbers() {
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumber[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const fetchingRef = useRef(false)
+  const lastFetchRef = useRef(0)
 
   const fetchPhoneNumbers = async () => {
-    if (!user) {
+    if (!user || fetchingRef.current) {
       setLoading(false)
       return
     }
 
+    // Prevent rapid successive calls
+    const now = Date.now()
+    if (now - lastFetchRef.current < 1000) {
+      console.log("📱 [USE-USER-DATA] Skipping fetch - too soon after last request")
+      return
+    }
+
     try {
+      fetchingRef.current = true
+      lastFetchRef.current = now
       setLoading(true)
       setError(null)
 
       console.log("📱 [USE-USER-DATA] Fetching phone numbers for user:", user.id)
 
-      // Fetch phone numbers with pathway_id directly from phone_numbers table
-      // CRITICAL: Filter by user_id to ensure users only see their own numbers
+      // First try the API endpoint with proper error handling
+      try {
+        const response = await fetch("/api/user/phone-numbers", {
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        })
+
+        // Check if response is actually JSON
+        const contentType = response.headers.get("content-type")
+        if (!contentType || !contentType.includes("application/json")) {
+          throw new Error("Server returned non-JSON response")
+        }
+
+        if (response.ok) {
+          const data = await response.json()
+          console.log("✅ [USE-USER-DATA] Phone numbers fetched from API:", {
+            count: data?.phoneNumbers?.length || 0,
+            userId: user.id,
+          })
+
+          setPhoneNumbers(data.phoneNumbers || [])
+          setLoading(false)
+          return
+        } else if (response.status === 429) {
+          throw new Error("Too many requests. Please wait a moment and try again.")
+        } else {
+          console.warn("⚠️ [USE-USER-DATA] API fetch failed, falling back to direct query")
+        }
+      } catch (apiError: any) {
+        console.warn("⚠️ [USE-USER-DATA] API error, falling back to direct query:", apiError.message)
+
+        // If it's a rate limit error, don't fallback
+        if (apiError.message.includes("Too many requests")) {
+          throw apiError
+        }
+      }
+
+      // Fallback to direct query if API fails
       const { data, error: fetchError } = await supabase
         .from("phone_numbers")
         .select("*")
         .eq("user_id", user.id) // 🔒 Security: Filter by current user's ID
-        .in("status", ["active", "purchased"])
+        .or("status.eq.active,status.eq.purchased")
         .order("created_at", { ascending: false })
 
       if (fetchError) {
         throw new Error(fetchError.message)
       }
 
-      console.log("✅ [USE-USER-DATA] Phone numbers fetched:", {
+      console.log("✅ [USE-USER-DATA] Phone numbers fetched from direct query:", {
         count: data?.length || 0,
         userId: user.id,
         sampleData: data?.[0]
@@ -75,12 +124,15 @@ export function useUserPhoneNumbers() {
       setError(err.message)
     } finally {
       setLoading(false)
+      fetchingRef.current = false
     }
   }
 
   useEffect(() => {
-    if (!authLoading) {
+    if (!authLoading && user) {
       fetchPhoneNumbers()
+    } else if (!authLoading && !user) {
+      setLoading(false)
     }
   }, [user, authLoading])
 
@@ -118,7 +170,7 @@ export function useCallHistory(phoneNumber?: string) {
 
       // Use the improved call history API with pagination
       const response = await fetch(
-        `/api/bland-ai/call-history?phone=${encodeURIComponent(phone)}&page=${page}&pageSize=${pageSize}`,
+        `/api/bland-ai/proxy/calls?phone=${encodeURIComponent(phone)}&page=${page}&pageSize=${pageSize}`,
         {
           credentials: "include",
           headers: {
@@ -128,6 +180,12 @@ export function useCallHistory(phoneNumber?: string) {
       )
 
       console.log("📡 [USE-CALL-HISTORY] Response status:", response.status)
+
+      // Check if response is actually JSON
+      const contentType = response.headers.get("content-type")
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("Server returned non-JSON response")
+      }
 
       if (!response.ok) {
         const errorText = await response.text()

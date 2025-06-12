@@ -1,58 +1,76 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { createServerClient } from "@supabase/ssr"
+import { createRouteHandlerClient } from "@supabase/auth-helpers-nextjs"
+import { cookies } from "next/headers"
 import type { Database } from "@/types/supabase"
+
+// Rate limiting map
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>()
+
+function checkRateLimit(userId: string): boolean {
+  const now = Date.now()
+  const userLimit = rateLimitMap.get(userId)
+
+  if (!userLimit || now > userLimit.resetTime) {
+    rateLimitMap.set(userId, { count: 1, resetTime: now + 60000 }) // 1 minute window
+    return true
+  }
+
+  if (userLimit.count >= 10) {
+    // 10 requests per minute
+    return false
+  }
+
+  userLimit.count++
+  return true
+}
 
 export async function GET(request: NextRequest) {
   try {
     console.log("🔍 [PHONE-NUMBERS] Starting request...")
 
-    // Create server client with request/response pattern
-    const supabaseResponse = NextResponse.next()
+    // Create route handler client with proper cookie handling for RLS
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient<Database>({
+      cookies: () => cookieStore,
+    })
 
-    const supabase = createServerClient<Database>(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return request.cookies.getAll()
-          },
-          setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) => {
-              request.cookies.set(name, value)
-              supabaseResponse.cookies.set(name, value, options)
-            })
-          },
-        },
-      },
-    )
+    console.log("🔍 [PHONE-NUMBERS] Getting user session...")
 
-    console.log("🔍 [PHONE-NUMBERS] Getting user...")
-
-    // Get user directly (this works better in API routes)
+    // Get user session (required for RLS)
     const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession()
 
-    if (userError) {
-      console.error("🚨 [PHONE-NUMBERS] User error:", userError)
-      return NextResponse.json({ error: "Authentication failed", details: userError.message }, { status: 401 })
+    if (sessionError) {
+      console.error("🚨 [PHONE-NUMBERS] Session error:", sessionError)
+      return NextResponse.json({ error: "Authentication failed", details: sessionError.message }, { status: 401 })
     }
 
-    if (!user) {
-      console.error("🚨 [PHONE-NUMBERS] No user found")
-      return NextResponse.json({ error: "No authenticated user" }, { status: 401 })
+    if (!session?.user) {
+      console.error("🚨 [PHONE-NUMBERS] No authenticated user session")
+      return NextResponse.json({ error: "No authenticated user session" }, { status: 401 })
     }
 
-    console.log("✅ [PHONE-NUMBERS] User authenticated:", user.id)
+    const userId = session.user.id
+    console.log("✅ [PHONE-NUMBERS] User authenticated:", userId)
 
-    // Fetch user's phone numbers from database
+    // Check rate limiting
+    if (!checkRateLimit(userId)) {
+      console.warn("⚠️ [PHONE-NUMBERS] Rate limit exceeded for user:", userId)
+      return NextResponse.json(
+        { error: "Too many requests", details: "Please wait before making another request" },
+        { status: 429 },
+      )
+    }
+
+    // Add delay to prevent rapid successive calls
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    // Fetch user's phone numbers from database (RLS will automatically filter by user)
     const { data: phoneNumbers, error: phoneError } = await supabase
       .from("phone_numbers")
       .select("*")
-      .eq("user_id", user.id)
-      .in("status", ["active", "purchased"])
       .order("created_at", { ascending: false })
 
     if (phoneError) {
@@ -60,19 +78,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch phone numbers", details: phoneError.message }, { status: 500 })
     }
 
-    console.log("📱 [PHONE-NUMBERS] Found:", { count: phoneNumbers?.length || 0, phoneNumbers })
+    console.log("📱 [PHONE-NUMBERS] Found:", {
+      count: phoneNumbers?.length || 0,
+      userId,
+      phoneNumbers: phoneNumbers?.map((p) => ({ id: p.id, number: p.number, status: p.status })),
+    })
 
-    const response = NextResponse.json({
+    return NextResponse.json({
       phoneNumbers: phoneNumbers || [],
       count: phoneNumbers?.length || 0,
     })
-
-    // Copy any cookies that were set
-    supabaseResponse.cookies.getAll().forEach((cookie) => {
-      response.cookies.set(cookie.name, cookie.value, cookie)
-    })
-
-    return response
   } catch (error: any) {
     console.error("🚨 [PHONE-NUMBERS] API error:", error)
     return NextResponse.json({ error: "Internal server error", details: error.message }, { status: 500 })

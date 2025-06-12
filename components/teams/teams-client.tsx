@@ -8,8 +8,9 @@ import { Users, Plus, Settings, Trash2, UserPlus } from "lucide-react"
 import { useAuth } from "@/contexts/auth-context" // ✅ Use modern auth context
 import { toast } from "@/components/ui/use-toast"
 import { CreateTeamDialog } from "./create-team-dialog"
-import { InviteMemberDialog } from "./invite-member-dialog"
 import { useRouter } from "next/navigation"
+import { useSupabaseBrowser } from "@/lib/supabase-browser" // ✅ Import singleton
+import { Skeleton } from "@/components/ui/skeleton"
 
 interface Team {
   id: string
@@ -20,133 +21,134 @@ interface Team {
   role: "owner" | "admin" | "member"
 }
 
-interface TeamsClientProps {
-  initialTeams?: Team[]
-}
-
-export function TeamsClient({ initialTeams = [] }: TeamsClientProps) {
-  // ✅ Use modern auth context instead of manual Supabase client
-  const { user, loading: authLoading } = useAuth()
-  const router = useRouter()
-
-  const [teams, setTeams] = useState<Team[]>(initialTeams)
-  const [loading, setLoading] = useState(false)
+export function TeamsClient() {
+  const [teams, setTeams] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [createDialogOpen, setCreateDialogOpen] = useState(false)
-  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
+  const router = useRouter()
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
+  const { user, loading: authLoading } = useAuth()
 
-  // ✅ Fetch teams when component mounts and user is authenticated
   useEffect(() => {
-    if (user && !authLoading && initialTeams.length === 0) {
-      fetchTeams()
-    }
-  }, [user, authLoading])
+    async function loadTeams() {
+      try {
+        setLoading(true)
+        setError(null)
 
-  // ✅ Show loading state while auth is loading
-  if (authLoading) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading teams...</p>
-        </div>
-      </div>
-    )
-  }
+        // Get current user
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser()
 
-  // ✅ Show auth required state
-  if (!user) {
-    return (
-      <div className="flex items-center justify-center p-8">
-        <div className="text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
-          <p className="text-gray-600">Please log in to view teams.</p>
-        </div>
-      </div>
-    )
-  }
-
-  const fetchTeams = async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch("/api/teams", {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
+        if (userError) {
+          console.error("Error getting user:", userError)
+          setError("Authentication error. Please try logging in again.")
+          return
         }
-        throw new Error(`Failed to fetch teams: ${response.status}`)
-      }
 
-      const data = await response.json()
-
-      if (data.success && Array.isArray(data.teams)) {
-        setTeams(data.teams)
-      } else {
-        throw new Error(data.error || "Invalid response format")
-      }
-    } catch (error) {
-      console.error("Error fetching teams:", error)
-      setError(error instanceof Error ? error.message : "Failed to fetch teams")
-      toast({
-        title: "Error loading teams",
-        description: error instanceof Error ? error.message : "Failed to fetch teams",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleCreateTeam = async (teamData: { name: string; description: string }) => {
-    try {
-      // ✅ Use secure API route with automatic cookie-based auth
-      const response = await fetch("/api/teams", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(teamData),
-        credentials: "include", // ✅ Include cookies for authentication
-      })
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error("Authentication required. Please log in again.")
+        if (!user) {
+          console.error("No user found")
+          setError("No authenticated user found. Please log in.")
+          return
         }
-        throw new Error(`Failed to create team: ${response.status}`)
+
+        // Fetch teams where user is a member
+        const { data: memberTeams, error: memberError } = await supabase
+          .from("team_members")
+          .select("team_id, teams(*)")
+          .eq("user_id", user.id)
+
+        if (memberError) {
+          console.error("Error fetching team memberships:", memberError)
+          setError("Failed to load your teams. Please try again later.")
+          return
+        }
+
+        // Fetch teams created by the user
+        const { data: ownerTeams, error: ownerError } = await supabase
+          .from("teams")
+          .select("*")
+          .eq("creator_id", user.id)
+
+        if (ownerError) {
+          console.error("Error fetching owned teams:", ownerError)
+          setError("Failed to load your teams. Please try again later.")
+          return
+        }
+
+        // Combine and deduplicate teams
+        const memberTeamsData = memberTeams ? memberTeams.map((membership) => membership.teams) : []
+        const allTeams = [...(ownerTeams || []), ...memberTeamsData]
+
+        // Remove duplicates by team ID
+        const uniqueTeams = Array.from(new Map(allTeams.map((team) => [team.id, team])).values())
+
+        setTeams(uniqueTeams)
+      } catch (error) {
+        console.error("Error loading teams:", error)
+        setError("An unexpected error occurred. Please try again later.")
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (user && !authLoading) {
+      loadTeams()
+    }
+  }, [supabase, user, authLoading])
+
+  const handleCreateTeam = async (newTeam: any) => {
+    try {
+      // Get current user
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        console.error("No user found")
+        return
       }
 
-      const data = await response.json()
-
-      if (data.success) {
-        setTeams((prev) => [...prev, data.team])
-        setCreateDialogOpen(false)
-        toast({
-          title: "Team created",
-          description: `Team "${teamData.name}" has been created successfully.`,
+      // Insert new team
+      const { data: team, error: teamError } = await supabase
+        .from("teams")
+        .insert({
+          name: newTeam.name,
+          description: newTeam.description,
+          creator_id: user.id,
         })
-      } else {
-        throw new Error(data.error || "Failed to create team")
+        .select()
+        .single()
+
+      if (teamError) {
+        console.error("Error creating team:", teamError)
+        return
       }
-    } catch (error) {
-      console.error("Error creating team:", error)
-      toast({
-        title: "Error creating team",
-        description: error instanceof Error ? error.message : "Failed to create team",
-        variant: "destructive",
+
+      // Add creator as a member with admin role
+      const { error: memberError } = await supabase.from("team_members").insert({
+        team_id: team.id,
+        user_id: user.id,
+        role: "admin",
       })
+
+      if (memberError) {
+        console.error("Error adding team member:", memberError)
+        return
+      }
+
+      // Update local state
+      setTeams([...teams, team])
+      setIsCreateDialogOpen(false)
+    } catch (error) {
+      console.error("Error in handleCreateTeam:", error)
     }
+  }
+
+  const handleViewTeam = (teamId: string) => {
+    router.push(`/dashboard/teams/${teamId}`)
   }
 
   const handleDeleteTeam = async (teamId: string) => {
@@ -193,8 +195,7 @@ export function TeamsClient({ initialTeams = [] }: TeamsClientProps) {
   }
 
   const handleInviteMember = (teamId: string) => {
-    setSelectedTeamId(teamId)
-    setInviteDialogOpen(true)
+    // Logic for handling invite member
   }
 
   const getRoleBadge = (role: string) => {
@@ -218,130 +219,153 @@ export function TeamsClient({ initialTeams = [] }: TeamsClientProps) {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Teams</h2>
-          <p className="text-gray-600">Manage your teams and collaborate with others</p>
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={fetchTeams} disabled={loading} variant="outline">
-            {loading ? "Loading..." : "Refresh"}
-          </Button>
-          <Button onClick={() => setCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Create Team
-          </Button>
+  if (authLoading) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading teams...</p>
         </div>
       </div>
+    )
+  }
 
-      {/* Error State */}
-      {error && (
-        <Card className="border-red-200 bg-red-50">
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-2 text-red-800">
-              <span className="font-medium">Error:</span>
-              <span>{error}</span>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Loading State */}
-      {loading && (
-        <div className="flex items-center justify-center p-8">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center p-8">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
+          <p className="text-gray-600">Please log in to view teams.</p>
         </div>
-      )}
+      </div>
+    )
+  }
 
-      {/* Teams Grid */}
-      {!loading && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {teams.length === 0 ? (
-            <Card className="col-span-full">
-              <CardContent className="pt-6">
-                <div className="text-center text-gray-500">
-                  <Users className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-                  <h3 className="text-lg font-medium mb-2">No teams yet</h3>
-                  <p className="mb-4">Create your first team to start collaborating.</p>
-                  <Button onClick={() => setCreateDialogOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Team
-                  </Button>
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">Your Teams</h2>
+          <Skeleton className="h-10 w-[150px]" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i}>
+              <CardHeader>
+                <Skeleton className="h-6 w-[150px] mb-2" />
+                <Skeleton className="h-4 w-[200px]" />
+              </CardHeader>
+              <CardContent>
+                <Skeleton className="h-4 w-full mb-2" />
+                <Skeleton className="h-4 w-3/4" />
+                <div className="mt-4">
+                  <Skeleton className="h-9 w-full" />
                 </div>
               </CardContent>
             </Card>
-          ) : (
-            teams.map((team) => (
-              <Card key={team.id} className="hover:shadow-md transition-shadow">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        {team.name}
-                      </CardTitle>
-                      <div className="flex items-center gap-2">
-                        {getRoleBadge(team.role)}
-                        <span className="text-sm text-gray-500">
-                          {team.member_count} member{team.member_count !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex gap-1">
-                      {(team.role === "owner" || team.role === "admin") && (
-                        <>
-                          <Button size="sm" variant="ghost" onClick={() => handleInviteMember(team.id)}>
-                            <UserPlus className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" onClick={() => router.push(`/dashboard/teams/${team.id}`)}>
-                            <Settings className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                      {team.role === "owner" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDeleteTeam(team.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {team.description && <CardDescription className="mb-3">{team.description}</CardDescription>}
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500">
-                      Created {new Date(team.created_at).toLocaleDateString()}
-                    </span>
-                    <Button size="sm" variant="outline" onClick={() => router.push(`/dashboard/teams/${team.id}`)}>
-                      View Details
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">Your Teams</h2>
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" /> Create Team
+          </Button>
+        </div>
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-800">Error Loading Teams</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-red-700">{error}</p>
+            <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+              Try Again
+            </Button>
+          </CardContent>
+        </Card>
+        <CreateTeamDialog
+          open={isCreateDialogOpen}
+          onOpenChange={setIsCreateDialogOpen}
+          onCreateTeam={handleCreateTeam}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-bold">Your Teams</h2>
+        <Button onClick={() => setIsCreateDialogOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" /> Create Team
+        </Button>
+      </div>
+
+      {teams.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>No Teams Yet</CardTitle>
+            <CardDescription>Create a team to collaborate with others on call flows and phone numbers</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center justify-center py-6">
+            <Users className="h-16 w-16 text-muted-foreground mb-4" />
+            <p className="text-center text-muted-foreground mb-4">
+              Teams allow you to collaborate with others on call flows and share phone numbers
+            </p>
+            <Button onClick={() => setIsCreateDialogOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" /> Create Your First Team
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {teams.map((team) => (
+            <Card key={team.id}>
+              <CardHeader>
+                <CardTitle>{team.name}</CardTitle>
+                <CardDescription>Created {new Date(team.created_at).toLocaleDateString()}</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">{team.description || "No description provided"}</p>
+                <Button variant="outline" className="w-full" onClick={() => handleViewTeam(team.id)}>
+                  View Team
+                </Button>
+                {(team.role === "owner" || team.role === "admin") && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => handleInviteMember(team.id)}>
+                      <UserPlus className="h-4 w-4" />
                     </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
+                    <Button size="sm" variant="ghost" onClick={() => router.push(`/dashboard/teams/${team.id}`)}>
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                  </>
+                )}
+                {team.role === "owner" && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => handleDeleteTeam(team.id)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* Dialogs */}
-      <CreateTeamDialog open={createDialogOpen} onOpenChange={setCreateDialogOpen} onCreateTeam={handleCreateTeam} />
-
-      <InviteMemberDialog
-        open={inviteDialogOpen}
-        onOpenChange={setInviteDialogOpen}
-        teamId={selectedTeamId}
-        onInviteSent={() => {
-          setInviteDialogOpen(false)
-          setSelectedTeamId(null)
-        }}
+      <CreateTeamDialog
+        open={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+        onCreateTeam={handleCreateTeam}
       />
     </div>
   )

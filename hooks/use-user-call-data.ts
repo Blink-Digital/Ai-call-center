@@ -1,9 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useAuth } from "@/contexts/auth-context"
 import { useSupabaseBrowser } from "@/lib/supabase-browser"
-import { toE164Format } from "@/utils/phone-utils"
 
 export interface UserCall {
   id: string
@@ -31,6 +30,8 @@ export interface UserCallData {
 export function useUserCallData() {
   const { user, loading: authLoading } = useAuth()
   const supabase = useSupabaseBrowser()
+  const hasInitialized = useRef(false)
+  const isCurrentlyFetching = useRef(false)
 
   const [callData, setCallData] = useState<UserCallData>({
     calls: [],
@@ -41,18 +42,19 @@ export function useUserCallData() {
     lastUpdated: null,
   })
 
-  const fetchUserCallData = async () => {
-    if (!user) {
-      setCallData((prev) => ({ ...prev, loading: false }))
+  const fetchUserCallData = useCallback(async () => {
+    if (!user || authLoading || isCurrentlyFetching.current) {
+      console.log("📱 [USE-USER-CALL-DATA] Skipping fetch - conditions not met")
       return
     }
 
     try {
+      isCurrentlyFetching.current = true
       setCallData((prev) => ({ ...prev, loading: true, error: null }))
 
       console.log("📱 [USE-USER-CALL-DATA] Fetching data for user:", user.id)
 
-      // 1. First, get the user's phone number from our database
+      // 1. Get user's phone numbers
       const { data: phoneNumbers, error: phoneError } = await supabase
         .from("phone_numbers")
         .select("number")
@@ -66,7 +68,7 @@ export function useUserCallData() {
       }
 
       if (!phoneNumbers || phoneNumbers.length === 0) {
-        console.log("📱 [USE-USER-CALL-DATA] No phone numbers found for user")
+        console.log("📱 [USE-USER-CALL-DATA] No phone numbers found")
         setCallData({
           calls: [],
           totalCalls: 0,
@@ -79,41 +81,58 @@ export function useUserCallData() {
       }
 
       const userPhoneNumber = phoneNumbers[0].number
-      console.log("📱 [USE-USER-CALL-DATA] User phone number (raw):", userPhoneNumber)
+      console.log("📱 [USE-USER-CALL-DATA] User phone number:", userPhoneNumber)
 
-      // 2. Convert to clean E.164 format for Bland.ai API
-      const cleanPhoneNumber = toE164Format(userPhoneNumber)
-      console.log("📱 [USE-USER-CALL-DATA] User phone number (E.164):", cleanPhoneNumber)
-
-      // 3. Now fetch calls from Bland.ai using clean E.164 format
-      // ✅ FIXED: Use to_number instead of from_number
-      const blandResponse = await fetch(
-        `/api/bland-ai/proxy/calls?to_number=${encodeURIComponent(cleanPhoneNumber)}&limit=1000`,
-      )
-
-      if (!blandResponse.ok) {
-        const errorText = await blandResponse.text()
-        throw new Error(`Bland.ai API error: ${blandResponse.status} ${errorText}`)
-      }
-
-      const blandData = await blandResponse.json()
-      console.log("📞 [USE-USER-CALL-DATA] Bland.ai response:", {
-        callsCount: blandData.calls?.length || 0,
-        total: blandData.total,
-        queryUsed: `to_number=${cleanPhoneNumber}`, // Log the query used
+      // 2. Fetch calls from Bland.ai via our proxy
+      const response = await fetch(`/api/bland-ai/proxy/calls?limit=50`, {
+        method: "GET",
+        credentials: "include",
       })
 
-      // 4. Update state with the fetched data
+      if (!response.ok) {
+        throw new Error(`Failed to fetch calls: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      console.log("✅ [USE-USER-CALL-DATA] Fetched calls:", {
+        count: data.calls?.length || 0,
+        total: data.total,
+        sample: data.calls?.[0],
+      })
+
+      // Transform the calls to match our interface
+      const transformedCalls: UserCall[] = (data.calls || []).map((call: any) => ({
+        id: call.call_id,
+        to_number: call.to || call.to_number || "",
+        from_number: call.from || call.from_number || "",
+        status: call.queue_status || call.status || (call.completed ? "completed" : "failed"),
+        duration: Math.round((call.call_length || 0) * 60), // Convert minutes to seconds
+        start_time: call.created_at || call.start_time || new Date().toISOString(),
+        pathway_id: call.pathway_id,
+        pathway_name: call.pathway_name,
+        outcome: call.answered_by,
+        recording_url: call.recording_url,
+        transcript: call.transcript,
+      }))
+
       setCallData({
-        calls: blandData.calls || [],
-        totalCalls: blandData.calls?.length || 0,
-        userPhoneNumber, // Store the original formatted version for display
+        calls: transformedCalls,
+        totalCalls: data.total || transformedCalls.length,
+        userPhoneNumber,
         loading: false,
         error: null,
         lastUpdated: new Date(),
       })
 
-      console.log("✅ [USE-USER-CALL-DATA] Data loaded successfully")
+      console.log("✅ [USE-USER-CALL-DATA] Data transformed successfully:", {
+        transformedCount: transformedCalls.length,
+        firstCall: transformedCalls[0],
+      })
     } catch (error: any) {
       console.error("❌ [USE-USER-CALL-DATA] Error:", error)
       setCallData((prev) => ({
@@ -121,15 +140,19 @@ export function useUserCallData() {
         loading: false,
         error: error.message,
       }))
+    } finally {
+      isCurrentlyFetching.current = false
     }
-  }
+  }, [user, authLoading, supabase])
 
-  // Fetch data when user is confirmed
+  // Only fetch once when component mounts and user is ready
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!authLoading && user && !hasInitialized.current) {
+      hasInitialized.current = true
+      console.log("📱 [USE-USER-CALL-DATA] Initializing data fetch")
       fetchUserCallData()
     }
-  }, [user, authLoading])
+  }, [user, authLoading, fetchUserCallData])
 
   return {
     ...callData,

@@ -5,14 +5,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useRouter } from "next/navigation"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { useSupabaseBrowser } from "@/lib/supabase-browser" // ✅ Import singleton
 
 export function RecentFlows() {
   const [flows, setFlows] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
-  const supabase = createClientComponentClient()
+  const supabase = useSupabaseBrowser() // ✅ Use singleton instead of creating new instance
 
   useEffect(() => {
     async function loadFlows() {

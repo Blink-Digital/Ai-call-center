@@ -4,9 +4,22 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import FlowchartBuilder from "@/components/flowchart-builder/flowchart-builder"
 import { formatPhoneNumber } from "@/utils/phone-utils"
 import { useAuth } from "@/contexts/auth-context"
+import dynamic from "next/dynamic"
+
+// ✅ FIX: Use dynamic import to prevent SSR issues and hook call errors
+const FlowchartBuilder = dynamic(() => import("@/components/flowchart-builder/flowchart-builder"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-full flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading flowchart builder...</p>
+      </div>
+    </div>
+  ),
+})
 
 interface PathwayInfo {
   pathway_id: string | null
@@ -32,6 +45,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
   const [pathwayInfo, setPathwayInfo] = useState<PathwayInfo | null>(null)
   const [isLoadingPathway, setIsLoadingPathway] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isInitialized, setIsInitialized] = useState(false)
 
   // Decode and validate phone number
   const rawPhoneNumber = params?.phoneNumber
@@ -40,6 +54,8 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
   console.log("[PATHWAY-PAGE] 🔍 Raw params:", params)
   console.log("[PATHWAY-PAGE] 📞 Decoded phone number:", phoneNumber)
   console.log("[PATHWAY-PAGE] 👤 Auth user:", user?.email)
+  console.log("[PATHWAY-PAGE] 🔄 Auth loading:", authLoading)
+  console.log("[PATHWAY-PAGE] 🎯 Is initialized:", isInitialized)
 
   useEffect(() => {
     // Validate phone number
@@ -47,6 +63,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       console.error("[PATHWAY-PAGE] ❌ Invalid phone number:", phoneNumber)
       setError("Invalid phone number")
       setIsLoadingPathway(false)
+      setIsInitialized(true)
       return
     }
 
@@ -66,6 +83,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       console.error("[PATHWAY-PAGE] ❌ Cannot fetch pathway info - invalid phone number")
       setError("Invalid phone number")
       setIsLoadingPathway(false)
+      setIsInitialized(true)
       return
     }
 
@@ -79,6 +97,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       console.error("[PATHWAY-PAGE] ❌ No authenticated user")
       setError("Authentication required. Please log in.")
       setIsLoadingPathway(false)
+      setIsInitialized(true)
       return
     }
 
@@ -95,6 +114,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
           pathway_description: null,
         })
         setIsLoadingPathway(false)
+        setIsInitialized(true)
         return
       }
 
@@ -123,6 +143,7 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
           setError(`API error: ${response.status} - ${errorText}`)
         }
         setIsLoadingPathway(false)
+        setIsInitialized(true)
         return
       }
 
@@ -146,14 +167,15 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
       setError(error instanceof Error ? error.message : "Unknown error")
     } finally {
       setIsLoadingPathway(false)
+      setIsInitialized(true)
     }
   }
 
   useEffect(() => {
-    if (phoneNumber && phoneNumber !== "undefined") {
+    if (phoneNumber && phoneNumber !== "undefined" && !isInitialized) {
       fetchPathwayInfo()
     }
-  }, [phoneNumber, searchParams?.pathwayId, user, authLoading])
+  }, [phoneNumber, searchParams?.pathwayId, user, authLoading, isInitialized])
 
   const handleAIGeneratorClick = () => {
     if (!phoneNumber || phoneNumber === "undefined") {
@@ -163,8 +185,8 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     router.push(`/dashboard/call-flows/generate?phoneNumber=${phoneNumber}`)
   }
 
-  // Show loading state while auth is loading
-  if (authLoading) {
+  // ✅ CRITICAL: Only show loading if we're actually loading AND not initialized
+  if (authLoading && !isInitialized) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
         <div className="text-center">
@@ -175,8 +197,8 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
     )
   }
 
-  // Show auth required state
-  if (!user) {
+  // ✅ CRITICAL: Only show auth required if we're initialized and no user
+  if (isInitialized && !user) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
         <div className="text-center">
@@ -196,6 +218,18 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
           <h1 className="text-2xl font-bold text-red-600 mb-4">Invalid Phone Number</h1>
           <p className="text-gray-600 mb-4">The phone number parameter is missing or invalid.</p>
           <Button onClick={() => router.push("/dashboard/phone-numbers")}>Go to Phone Numbers</Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ✅ CRITICAL: Only render the main content if we're initialized
+  if (!isInitialized) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Initializing pathway editor...</p>
         </div>
       </div>
     )
