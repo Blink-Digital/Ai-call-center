@@ -38,12 +38,106 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const isAuthenticated = !!user
   const initializedRef = useRef(false)
-  const isLoggingInRef = useRef(false) // Track if we're in the middle of a login
+  const isLoggingInRef = useRef(false)
   const supabase = useSupabaseBrowser()
   const router = useRouter()
   const pathname = usePathname()
 
-  // ✅ Simple session refresh without complex sync
+  // Fetch user profile from public.users table
+  const fetchUserProfile = async (userId: string) => {
+    try {
+      console.log("🔄 [AUTH-CONTEXT] Fetching user profile for:", userId)
+
+      const { data: profile, error } = await supabase.from("users").select("*").eq("id", userId).single()
+
+      if (error) {
+        console.error("❌ [AUTH-CONTEXT] Error fetching user profile:", error)
+        return null
+      }
+
+      console.log("✅ [AUTH-CONTEXT] User profile fetched:", profile)
+      return {
+        id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        company: profile.company,
+        phoneNumber: profile.phone_number,
+        role: profile.role,
+      }
+    } catch (error) {
+      console.error("❌ [AUTH-CONTEXT] Unexpected error fetching profile:", error)
+      return null
+    }
+  }
+
+  // Create user profile if it doesn't exist (fallback for trigger failure)
+  const createUserProfile = async (authUser: any) => {
+    try {
+      console.log("🔄 [AUTH-CONTEXT] Creating user profile for:", authUser.id)
+
+      const { data, error } = await supabase
+        .from("users")
+        .insert({
+          id: authUser.id,
+          email: authUser.email,
+          name: authUser.user_metadata?.name || authUser.email,
+          company: authUser.user_metadata?.company || null,
+          phone_number: authUser.user_metadata?.phone_number || null,
+          role: "user",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error("❌ [AUTH-CONTEXT] Failed to create user profile:", error)
+        return null
+      }
+
+      console.log("✅ [AUTH-CONTEXT] User profile created:", data)
+      return {
+        id: data.id,
+        email: data.email,
+        name: data.name,
+        company: data.company,
+        phoneNumber: data.phone_number,
+        role: data.role,
+      }
+    } catch (error) {
+      console.error("❌ [AUTH-CONTEXT] Unexpected error creating profile:", error)
+      return null
+    }
+  }
+
+  // Get user data with profile sync
+  const getUserWithProfile = async (authUser: any) => {
+    // First try to get existing profile
+    let profile = await fetchUserProfile(authUser.id)
+
+    // If no profile exists, create one (fallback for trigger failure)
+    if (!profile) {
+      console.log("⚠️ [AUTH-CONTEXT] No profile found, creating one...")
+      profile = await createUserProfile(authUser)
+    }
+
+    // If still no profile, use auth data as fallback
+    if (!profile) {
+      console.log("⚠️ [AUTH-CONTEXT] Using auth data as fallback")
+      return {
+        id: authUser.id,
+        email: authUser.email,
+        name: authUser.user_metadata?.name || authUser.email,
+        company: authUser.user_metadata?.company,
+        phoneNumber: authUser.user_metadata?.phone_number,
+        role: "user",
+      }
+    }
+
+    return profile
+  }
+
+  // Simple session refresh with profile data
   const refreshSession = async () => {
     try {
       console.log("🔄 [AUTH-CONTEXT] Refreshing session...")
@@ -62,11 +156,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (session?.user) {
         console.log("✅ [AUTH-CONTEXT] Valid session found:", session.user.id)
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.name || session.user.email,
-        })
+
+        // Get user with profile sync
+        const userData = await getUserWithProfile(session.user)
+        setUser(userData)
         setLoading(false)
         return true
       }
@@ -83,7 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // ✅ Single initialization effect
+  // Single initialization effect
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -93,7 +186,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Initial session check
     refreshSession()
 
-    // ✅ Set up auth state listener with smarter redirect logic
+    // Set up auth state listener
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -102,15 +195,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("🔄 [AUTH-CONTEXT] Is logging in:", isLoggingInRef.current)
 
       if (event === "SIGNED_IN" && session?.user) {
-        console.log("✅ [AUTH-CONTEXT] User signed in, updating context...")
-        setUser({
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.name || session.user.email,
-        })
+        console.log("✅ [AUTH-CONTEXT] User signed in, fetching profile...")
+
+        // Get user with profile sync
+        const userData = await getUserWithProfile(session.user)
+        setUser(userData)
         setLoading(false)
 
-        // ✅ CRITICAL: Only redirect if we're actually logging in from login page
+        // Redirect logic
         if (isLoggingInRef.current || pathname === "/login") {
           console.log("🔄 [AUTH-CONTEXT] Redirecting to dashboard after login...")
           router.push("/dashboard")
@@ -127,11 +219,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (event === "INITIAL_SESSION") {
         if (session?.user) {
           console.log("✅ [AUTH-CONTEXT] Initial session confirmed:", session.user.id)
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.user_metadata?.name || session.user.email,
-          })
+
+          // Get user with profile sync
+          const userData = await getUserWithProfile(session.user)
+          setUser(userData)
         } else {
           console.log("❌ [AUTH-CONTEXT] No initial session found")
           setUser(null)
@@ -140,11 +231,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (event === "TOKEN_REFRESHED") {
         console.log("🔄 [AUTH-CONTEXT] Token refreshed, session still valid")
         if (session?.user && !user) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email,
-            name: session.user.user_metadata?.name || session.user.email,
-          })
+          const userData = await getUserWithProfile(session.user)
+          setUser(userData)
         }
       }
     })
@@ -160,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password: string) => {
     try {
       console.log("🔄 [AUTH-CONTEXT] Starting login for:", email)
-      isLoggingInRef.current = true // Mark that we're logging in
+      isLoggingInRef.current = true
 
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -180,7 +268,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       console.log("✅ [AUTH-CONTEXT] Login successful, user:", data.user.id)
 
-      // ✅ Let the auth state change handler handle the redirect
+      // Update last_login timestamp
+      await supabase
+        .from("users")
+        .update({
+          last_login: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", data.user.id)
+
       return { success: true, message: "Login successful" }
     } catch (error: any) {
       console.error("❌ [AUTH-CONTEXT] Unexpected login error:", error)
@@ -191,19 +287,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (data: SignupData) => {
     try {
+      console.log("🔄 [AUTH-CONTEXT] Starting signup for:", data.email)
+
+      // Create auth user with metadata
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
         options: {
           data: {
             name: data.name,
-            company: data.company,
-            phone_number: data.phoneNumber,
+            company: data.company || null,
+            phone_number: data.phoneNumber || null,
           },
         },
       })
 
       if (authError) {
+        console.error("❌ [AUTH-CONTEXT] Signup error:", authError)
         return { success: false, message: authError.message }
       }
 
@@ -211,8 +311,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, message: "Failed to create user" }
       }
 
-      return { success: true, message: "Account created successfully" }
+      console.log("✅ [AUTH-CONTEXT] Auth user created:", authData.user.id)
+
+      // Wait a moment for the trigger to process
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+
+      // Verify the profile was created (and create if needed)
+      const userData = await getUserWithProfile(authData.user)
+
+      if (userData) {
+        console.log("✅ [AUTH-CONTEXT] User profile confirmed:", userData)
+        return { success: true, message: "Account created successfully" }
+      } else {
+        console.error("❌ [AUTH-CONTEXT] Failed to create or verify user profile")
+        return { success: false, message: "Account created but profile setup failed" }
+      }
     } catch (error: any) {
+      console.error("❌ [AUTH-CONTEXT] Unexpected signup error:", error)
       return { success: false, message: error.message || "An unexpected error occurred" }
     }
   }
@@ -238,9 +353,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, message: "Not logged in" }
       }
 
+      console.log("🔄 [AUTH-CONTEXT] Updating profile for user:", user.id)
+
+      // Update the public.users table
+      const { error } = await supabase
+        .from("users")
+        .update({
+          name: data.name,
+          company: data.company,
+          phone_number: data.phoneNumber,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+
+      if (error) {
+        console.error("❌ [AUTH-CONTEXT] Profile update error:", error)
+        return { success: false, message: error.message }
+      }
+
+      // Update local state
       setUser((prev) => (prev ? { ...prev, ...data } : null))
+
+      console.log("✅ [AUTH-CONTEXT] Profile updated successfully")
       return { success: true, message: "Profile updated successfully" }
     } catch (error: any) {
+      console.error("❌ [AUTH-CONTEXT] Unexpected profile update error:", error)
       return { success: false, message: error.message || "An unexpected error occurred" }
     }
   }
