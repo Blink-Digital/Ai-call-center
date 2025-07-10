@@ -1,6 +1,5 @@
 "use client"
 
-import { NodeEditorDrawer } from "./node-editor-drawer"
 import type React from "react"
 import { useCallback, useRef, useState, useEffect } from "react"
 import ReactFlow, {
@@ -16,9 +15,12 @@ import ReactFlow, {
   type Node,
   getBezierPath,
   useReactFlow,
+  ReactFlowProvider,
 } from "reactflow"
 import "reactflow/dist/style.css"
-import { NodeSidebar } from "./node-sidebar"
+import { AddNodePanel } from "./add-node-panel"
+import { NodeEditorDrawer } from "./node-editor-drawer"
+import { EdgeEditorDrawer } from "./edge-editor-drawer"
 import { nodeTypes } from "./node-types"
 import { toast } from "@/components/ui/use-toast"
 import { Button } from "@/components/ui/button"
@@ -26,161 +28,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { initialNodes } from "./initial-data"
-import { Play } from "lucide-react"
+import { Play, Plus, Globe, Flag, Edit2 } from "lucide-react"
 import { JsonPreview } from "./json-preview"
 import { TestPathwayDialog } from "./test-pathway-dialog"
 import { useAuth } from "@/contexts/auth-context"
 import { saveFlowchart as saveFlowchartUtil } from "@/utils/save-flowchart"
 import { useSearchParams } from "next/navigation"
+import { convertFlowchartToBlandFormat, normalizeId } from "./deploy-utils"
 
 const initialEdges: Edge[] = []
 
-// Helper function to normalize IDs
-function normalizeId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_]/g, "_")
-}
-
-// Helper function to normalize node IDs
-function normalizeNodeIds(flowchart: any) {
-  if (!flowchart || !flowchart.nodes || !Array.isArray(flowchart.nodes)) {
-    console.warn("Invalid flowchart structure:", flowchart)
-    return flowchart
-  }
-
-  const idMap = new Map()
-  const normalizedFlowchart = JSON.parse(JSON.stringify(flowchart))
-
-  normalizedFlowchart.nodes = normalizedFlowchart.nodes.filter((node: any) => {
-    if (!node || !node.id || typeof node.id !== "string") {
-      console.warn("Skipping node with invalid ID:", node)
-      return false
-    }
-    return true
-  })
-
-  normalizedFlowchart.nodes.forEach((node: any) => {
-    const originalId = node.id
-    const normalizedId = originalId.replace(/[^a-zA-Z0-9_]/g, "_")
-    node.id = normalizedId
-    idMap.set(originalId, normalizedId)
-  })
-
-  if (normalizedFlowchart.edges && Array.isArray(normalizedFlowchart.edges)) {
-    normalizedFlowchart.edges = normalizedFlowchart.edges.filter((edge: any) => {
-      if (!edge || !edge.source || !edge.target || typeof edge.source !== "string" || typeof edge.target !== "string") {
-        console.warn("Skipping edge with invalid source or target:", edge)
-        return false
-      }
-      return true
-    })
-
-    normalizedFlowchart.edges.forEach((edge: any) => {
-      if (idMap.has(edge.source)) {
-        edge.source = idMap.get(edge.source)
-      }
-      if (idMap.has(edge.target)) {
-        edge.target = idMap.get(edge.target)
-      }
-      if (edge.sourceHandle && typeof edge.sourceHandle === "string") {
-        edge.sourceHandle = edge.sourceHandle.replace(/[^a-zA-Z0-9_]/g, "_")
-      }
-      if (edge.targetHandle && typeof edge.targetHandle === "string") {
-        edge.targetHandle = edge.targetHandle.replace(/[^a-zA-Z0-9_]/g, "_")
-      }
-    })
-  }
-
-  return normalizedFlowchart
-}
-
-// Convert flowchart to Bland format
-function convertFlowchartToBlandFormat(flowchart: any) {
-  console.log("Converting flowchart to Bland format:", flowchart)
-
-  if (!flowchart || !flowchart.nodes || !Array.isArray(flowchart.nodes)) {
-    console.error("Invalid flowchart structure:", flowchart)
-    return {
-      name: flowchart?.name || "Bland.ai Pathway",
-      description: flowchart?.description || `Pathway created on ${new Date().toISOString()}`,
-      nodes: [],
-      edges: [],
-    }
-  }
-
-  // Filter out invalid nodes and convert to Bland format
-  const blandNodes = flowchart.nodes
-    .filter((node: any) => node && node.id && node.type && node.data)
-    .map((node: any) => {
-      const blandNode: any = {
-        id: node.id,
-        type: mapNodeTypeToBlandType(node.type),
-        data: {
-          ...node.data,
-          isStart: false,
-        },
-      }
-
-      if (blandNode.type === "Default" && !blandNode.data.text) {
-        blandNode.data.text = "Default response"
-      }
-
-      if (blandNode.type === "End Call" && !blandNode.data.prompt) {
-        blandNode.data.prompt = blandNode.data.text || "Thank you for calling. Goodbye!"
-      }
-
-      return blandNode
-    })
-
-  // Set start node
-  if (blandNodes.length > 0) {
-    const greetingNode = blandNodes.find((node) => node.type === "Default")
-    if (greetingNode) {
-      greetingNode.data.isStart = true
-    } else {
-      blandNodes[0].data.isStart = true
-    }
-  }
-
-  // Convert edges to Bland format
-  const blandEdges = (flowchart.edges || [])
-    .filter((edge: any) => edge && edge.source && edge.target)
-    .map((edge: any) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      label: edge.data?.label || edge.label || "next",
-    }))
-
-  const result = {
-    name: flowchart.name || "Bland.ai Pathway",
-    description: flowchart.description || `Pathway created on ${new Date().toISOString()}`,
-    nodes: blandNodes,
-    edges: blandEdges,
-  }
-
-  console.log("Converted Bland format:", result)
-  return result
-}
-
-// Map node types to Bland types
-function mapNodeTypeToBlandType(type: string): string {
-  switch (type) {
-    case "greetingNode":
-    case "questionNode":
-    case "customerResponseNode":
-      return "Default"
-    case "endCallNode":
-      return "End Call"
-    case "transferNode":
-      return "Transfer Call"
-    case "webhookNode":
-      return "Webhook"
-    default:
-      return "Default"
-  }
-}
-
-// Custom edge component
+// Enhanced Custom Edge component with clickable labels
 const CustomEdge = ({
   id,
   sourceX,
@@ -193,8 +51,11 @@ const CustomEdge = ({
   style = {},
   markerEnd,
   selected,
+  onEdgeClick,
 }: any) => {
   const [isHovered, setIsHovered] = useState(false)
+  const { setEdges } = useReactFlow()
+
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
     sourceY,
@@ -204,8 +65,7 @@ const CustomEdge = ({
     targetPosition,
   })
 
-  const label = data?.label || "next"
-  const { setEdges } = useReactFlow()
+  const label = data?.label || "Proceed"
 
   const handleDelete = useCallback(
     (event: React.MouseEvent) => {
@@ -219,8 +79,13 @@ const CustomEdge = ({
     [id, setEdges],
   )
 
-  const deleteButtonX = (sourceX + targetX) / 2
-  const deleteButtonY = (sourceY + targetY) / 2 - 20
+  const handleLabelClick = useCallback(
+    (event: React.MouseEvent) => {
+      event.stopPropagation()
+      onEdgeClick?.(id)
+    },
+    [id, onEdgeClick],
+  )
 
   return (
     <>
@@ -248,75 +113,85 @@ const CustomEdge = ({
           }
         }}
       />
-      {label && (
+
+      {/* Clickable Label */}
+      <foreignObject
+        width={140}
+        height={40}
+        x={labelX - 70}
+        y={labelY - 20}
+        className="overflow-visible"
+        requiredExtensions="http://www.w3.org/1999/xhtml"
+      >
         <div
           style={{
-            position: "absolute",
-            transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             background: selected || isHovered ? "#eff6ff" : "white",
-            padding: "4px 8px",
-            borderRadius: "6px",
-            fontSize: "11px",
+            padding: "8px 12px",
+            borderRadius: "8px",
+            fontSize: "12px",
             fontWeight: 500,
-            pointerEvents: "all",
-            border: selected || isHovered ? "1px solid #3b82f6" : "1px solid #d1d5db",
+            border: selected || isHovered ? "2px solid #3b82f6" : "1px solid #d1d5db",
             cursor: "pointer",
-            boxShadow: selected || isHovered ? "0 0 0 3px rgba(59, 130, 246, 0.1)" : "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
+            boxShadow: selected || isHovered ? "0 0 0 3px rgba(59, 130, 246, 0.1)" : "0 2px 4px 0 rgba(0, 0, 0, 0.1)",
+            minWidth: "100px",
+            textAlign: "center",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            justifyContent: "center",
+            position: "relative",
+            zIndex: 1000,
+            transition: "all 0.2s ease-in-out",
           }}
           className="nodrag nopan"
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
-          onClick={(e) => {
-            e.stopPropagation()
-            setEdges((edges) =>
-              edges.map((e) => ({
-                ...e,
-                selected: e.id === id,
-              })),
-            )
-          }}
+          onClick={handleLabelClick}
         >
-          {label}
+          <span>{label}</span>
+          <Edit2 className="h-3 w-3 text-blue-600 opacity-70 hover:opacity-100" />
         </div>
-      )}
+      </foreignObject>
+
+      {/* Delete button */}
       {(selected || isHovered) && (
-        <div
-          style={{
-            position: "absolute",
-            transform: `translate(-50%, -50%) translate(${deleteButtonX}px, ${deleteButtonY}px)`,
-            background: "#ef4444",
-            color: "white",
-            borderRadius: "50%",
-            width: "22px",
-            height: "22px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "14px",
-            fontWeight: "bold",
-            cursor: "pointer",
-            pointerEvents: "all",
-            zIndex: 10,
-            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-            transition: "transform 0.1s ease-in-out",
-          }}
-          className="nodrag nopan"
-          onClick={handleDelete}
-          title="Delete connection"
+        <foreignObject
+          width={22}
+          height={22}
+          x={(sourceX + targetX) / 2 - 11}
+          y={(sourceY + targetY) / 2 - 31}
+          className="overflow-visible"
         >
-          ✖
-        </div>
+          <div
+            style={{
+              background: "#ef4444",
+              color: "white",
+              borderRadius: "50%",
+              width: "22px",
+              height: "22px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "14px",
+              fontWeight: "bold",
+              cursor: "pointer",
+              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+              zIndex: 1001,
+            }}
+            className="nodrag nopan"
+            onClick={handleDelete}
+            title="Delete connection"
+          >
+            ✖
+          </div>
+        </foreignObject>
       )}
     </>
   )
 }
 
-const edgeTypes = {
-  custom: CustomEdge,
-}
-
-// Main FlowchartBuilder component
-function FlowchartBuilderComponent({
+// Main FlowchartBuilder component (wrapped with ReactFlowProvider)
+function FlowchartBuilderInner({
   phoneNumber,
   initialPathwayId,
   initialPathwayName,
@@ -356,7 +231,18 @@ function FlowchartBuilderComponent({
   const [sendTestCallOpen, setSendTestCallOpen] = useState(false)
   const [selectedNodeForEdit, setSelectedNodeForEdit] = useState<any>(null)
   const [isNodeEditorOpen, setIsNodeEditorOpen] = useState(false)
+  const [selectedEdgeForEdit, setSelectedEdgeForEdit] = useState<Edge | null>(null)
+  const [isEdgeEditorOpen, setIsEdgeEditorOpen] = useState(false)
   const [existingPathwayId, setExistingPathwayId] = useState<string | null>(initialPathwayId || null)
+
+  // New state for the redesigned interface
+  const [isAddNodePanelOpen, setIsAddNodePanelOpen] = useState(false)
+  const [lastNodePosition, setLastNodePosition] = useState({ x: 250, y: 100 })
+
+  // Create edge types with click handler
+  const edgeTypes = {
+    custom: (props: any) => <CustomEdge {...props} onEdgeClick={handleEdgeClick} />,
+  }
 
   // Initialize pathway name
   useEffect(() => {
@@ -424,11 +310,12 @@ function FlowchartBuilderComponent({
   useEffect(() => {
     if (reactFlowInstance) {
       const flow = reactFlowInstance.toObject()
-      flow.name = pathwayName || "Bland.ai Pathway"
-      flow.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
+      const startNodeId = nodes.find((node) => node.type === "greetingNode")?.id || nodes[0]?.id || ""
 
-      const normalizedFlow = normalizeNodeIds(flow)
-      const blandFormat = convertFlowchartToBlandFormat(normalizedFlow)
+      const blandFormat = convertFlowchartToBlandFormat(flow.nodes, flow.edges, startNodeId)
+      blandFormat.name = pathwayName || "Bland.ai Pathway"
+      blandFormat.description = pathwayDescription || `Pathway created on ${new Date().toLocaleString()}`
+
       setBlandPayload(blandFormat)
     }
   }, [nodes, edges, reactFlowInstance, pathwayName, pathwayDescription])
@@ -436,7 +323,7 @@ function FlowchartBuilderComponent({
   const onConnect = useCallback(
     (params: Connection) => {
       const sourceNode = nodes.find((node) => node.id === params.source)
-      let edgeData = {}
+      let edgeLabel = "Proceed"
 
       if (sourceNode) {
         if (sourceNode.type === "customerResponseNode" && params.sourceHandle?.startsWith("response-")) {
@@ -446,100 +333,55 @@ function FlowchartBuilderComponent({
           if (responses.length > 0) {
             const responseText =
               responseIndex >= 0 && responseIndex < responses.length ? responses[responseIndex] : responses[0]
-            edgeData = { label: `User responded ${responseText}` }
-          } else {
-            edgeData = { label: "next" }
+            edgeLabel = `User responded ${responseText}`
           }
         } else if (sourceNode.type === "conditionalNode") {
           if (params.sourceHandle === "true") {
-            edgeData = { label: sourceNode.data.trueLabel || "Yes" }
+            edgeLabel = sourceNode.data.trueLabel || "Yes"
           } else if (params.sourceHandle === "false") {
-            edgeData = { label: sourceNode.data.falseLabel || "No" }
+            edgeLabel = sourceNode.data.falseLabel || "No"
           }
         }
       }
 
-      const edge = {
-        ...params,
-        data: edgeData,
+      const edge: Edge = {
+        id: `reactflow__edge-${params.source}-${params.target}`,
+        source: params.source!,
+        target: params.target!,
         type: "custom",
+        data: {
+          label: edgeLabel,
+          description: "",
+          alwaysPick: false,
+        },
       }
 
       setEdges((eds) => addEdge(edge, eds))
+
+      // Add toast notification to confirm edge creation
+      toast({
+        title: "Connection created",
+        description: `Added pathway with label: "${edgeLabel}"`,
+      })
     },
     [nodes, setEdges],
-  )
-
-  const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault()
-
-      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect()
-      const type = event.dataTransfer.getData("application/reactflow")
-
-      if (typeof type === "undefined" || !type || !reactFlowBounds || !reactFlowInstance) {
-        return
-      }
-
-      const position = reactFlowInstance.project({
-        x: event.clientX - reactFlowBounds.left,
-        y: event.clientY - reactFlowBounds.top,
-      })
-
-      const rawNodeId = `${type.toLowerCase()}_${Date.now()}`
-      const newNodeId = normalizeId(rawNodeId)
-
-      let nodeData = {}
-
-      switch (type) {
-        case "greetingNode":
-          nodeData = {
-            text: "Hello! This is an AI assistant calling. How are you today?",
-          }
-          break
-        case "questionNode":
-          nodeData = {
-            text: "What can I help you with today?",
-          }
-          break
-        case "responseNode":
-          nodeData = {
-            text: "I understand. Let me help you with that.",
-          }
-          break
-        case "customerResponseNode":
-          nodeData = {
-            responses: ["Age", "Name", "Email", "Phone"],
-            options: ["Age", "Name", "Email", "Phone"],
-            isOpenEnded: false,
-            intentDescription: "Capture customer's response and determine their intent",
-          }
-          break
-        case "endCallNode":
-          nodeData = {
-            text: "Thank you for your time. Goodbye!",
-          }
-          break
-        default:
-          nodeData = {}
-      }
-
-      const newNode: Node = {
-        id: newNodeId,
-        type,
-        position,
-        data: nodeData,
-      }
-
-      setNodes((nds) => nds.concat(newNode))
-    },
-    [reactFlowInstance, setNodes],
   )
 
   const handleNodeClick = useCallback((event: any, node: any) => {
     setSelectedNodeForEdit(node)
     setIsNodeEditorOpen(true)
   }, [])
+
+  const handleEdgeClick = useCallback(
+    (edgeId: string) => {
+      const edge = edges.find((e) => e.id === edgeId)
+      if (edge) {
+        setSelectedEdgeForEdit(edge)
+        setIsEdgeEditorOpen(true)
+      }
+    },
+    [edges],
+  )
 
   const handleUpdateNode = useCallback(
     (nodeId: string, updates: any) => {
@@ -560,15 +402,63 @@ function FlowchartBuilderComponent({
     [setNodes],
   )
 
+  const handleUpdateEdge = useCallback(
+    (edgeId: string, updates: any) => {
+      setEdges((eds) =>
+        eds.map((edge) =>
+          edge.id === edgeId
+            ? {
+                ...edge,
+                data: {
+                  ...edge.data,
+                  ...updates,
+                },
+              }
+            : edge,
+        ),
+      )
+    },
+    [setEdges],
+  )
+
   const handleCloseNodeEditor = useCallback(() => {
     setIsNodeEditorOpen(false)
     setSelectedNodeForEdit(null)
   }, [])
 
-  const onDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    event.dataTransfer.dropEffect = "move"
+  const handleCloseEdgeEditor = useCallback(() => {
+    setIsEdgeEditorOpen(false)
+    setSelectedEdgeForEdit(null)
   }, [])
+
+  const handleAddNode = useCallback(
+    (nodeType: string, nodeData: any) => {
+      const rawNodeId = `${nodeType.toLowerCase()}_${Date.now()}`
+      const newNodeId = normalizeId(rawNodeId)
+
+      // Calculate position with Y-offset from last node
+      const newPosition = {
+        x: lastNodePosition.x,
+        y: lastNodePosition.y + 150, // 150px offset
+      }
+
+      const newNode: Node = {
+        id: newNodeId,
+        type: nodeType,
+        position: newPosition,
+        data: nodeData,
+      }
+
+      setNodes((nds) => nds.concat(newNode))
+      setLastNodePosition(newPosition)
+
+      toast({
+        title: "Node added",
+        description: `${nodeType} has been added to your pathway`,
+      })
+    },
+    [lastNodePosition, setNodes],
+  )
 
   const handleDeploy = async () => {
     if (!reactFlowInstance) {
@@ -620,6 +510,20 @@ function FlowchartBuilderComponent({
     }
   }
 
+  const handleGlobalPrompt = () => {
+    toast({
+      title: "Global Prompt",
+      description: "Global prompt configuration coming soon...",
+    })
+  }
+
+  const handleFeatureFlags = () => {
+    toast({
+      title: "Feature Flags",
+      description: "Feature flags configuration coming soon...",
+    })
+  }
+
   // Show loading state while auth is loading
   if (authLoading) {
     return (
@@ -646,82 +550,127 @@ function FlowchartBuilderComponent({
 
   return (
     <>
-      <div className="flex h-screen w-full bg-gray-50 overflow-hidden">
-        <NodeSidebar />
-        <div className="flex-1 min-w-0 h-full overflow-hidden bg-white">
-          <div className="w-full h-full" ref={reactFlowWrapper}>
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onInit={setReactFlowInstance}
-              onDrop={onDrop}
-              onDragOver={onDragOver}
-              onNodeClick={handleNodeClick}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              defaultEdgeOptions={{ type: "custom" }}
-              selectNodesOnDrag={false}
-              elementsSelectable={true}
-              edgesFocusable={true}
-              edgesUpdatable={true}
-              fitView
-              deleteKeyCode={["Backspace", "Delete"]}
-              className="w-full h-full"
-              style={{ width: "100%", height: "100%" }}
-            >
-              <Controls className="bg-white border border-gray-200 shadow-lg rounded-xl" />
-              <MiniMap
-                className="bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden"
-                nodeColor="#3b82f6"
-                maskColor="rgba(0, 0, 0, 0.1)"
-              />
-              <Background variant="dots" gap={20} size={1} color="#e5e7eb" />
-              <Panel position="top-right" className="flex gap-3 p-4">
-                <Button onClick={handleSaveFlowchart} className="bg-green-600 hover:bg-green-700 shadow-md" size="sm">
-                  Save Flowchart
-                </Button>
-                <Button
-                  onClick={() => setTestPathwayOpen(true)}
-                  className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2 shadow-md"
-                  size="sm"
-                >
-                  <Play className="h-4 w-4" />
-                  Test Pathway
-                </Button>
-                {blandPayload && <JsonPreview data={blandPayload} title="Bland.ai Pathway JSON" />}
-                <Button onClick={handleDeploy} className="bg-blue-600 hover:bg-blue-700 shadow-md" size="sm">
-                  {existingPathwayId ? "Update Pathway" : "Deploy to Bland.ai"}
-                </Button>
-              </Panel>
-              <Panel
-                position="top-left"
-                className="flex flex-col gap-2 p-4 bg-white border border-gray-200 rounded-lg shadow-sm"
+      <div className="h-full w-full overflow-hidden bg-white relative">
+        {/* Floating Control Buttons - Top Left */}
+        <div className="absolute top-4 left-4 z-50 flex flex-col gap-3">
+          {/* Add New Node Button */}
+          <Button
+            onClick={() => setIsAddNodePanelOpen(true)}
+            className="bg-purple-600 hover:bg-purple-700 text-white rounded-lg py-3 px-4 flex items-center gap-2 font-medium shadow-lg transition-all duration-200 hover:shadow-xl"
+          >
+            <Plus className="h-5 w-5" />
+            Add new node
+          </Button>
+
+          {/* Global Prompt Button */}
+          <Button
+            onClick={handleGlobalPrompt}
+            variant="outline"
+            className="rounded-lg py-3 px-4 flex items-center gap-2 font-medium border-blue-200 hover:bg-blue-50 transition-all duration-200 bg-white shadow-lg text-blue-600 border-2 hover:border-blue-300"
+          >
+            <Globe className="h-4 w-4" />
+            Global Prompt
+          </Button>
+
+          {/* Feature Flags Button */}
+          <Button
+            onClick={handleFeatureFlags}
+            variant="outline"
+            className="rounded-lg py-3 px-4 flex items-center gap-2 font-medium border-gray-300 hover:bg-gray-50 transition-all duration-200 bg-white shadow-lg text-gray-600"
+          >
+            <Flag className="h-4 w-4" />
+            Feature Flags
+          </Button>
+        </div>
+
+        {/* Full Screen ReactFlow Canvas */}
+        <div className="w-full h-full" ref={reactFlowWrapper}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onInit={setReactFlowInstance}
+            onNodeClick={handleNodeClick}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            defaultEdgeOptions={{ type: "custom" }}
+            selectNodesOnDrag={false}
+            elementsSelectable={true}
+            edgesFocusable={true}
+            edgesUpdatable={true}
+            fitView
+            deleteKeyCode={["Backspace", "Delete"]}
+            className="w-full h-full"
+            style={{ width: "100%", height: "100%" }}
+          >
+            <Controls className="bg-white border border-gray-200 shadow-lg rounded-xl" />
+            <MiniMap
+              className="bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden"
+              nodeColor="#3b82f6"
+              maskColor="rgba(0, 0, 0, 0.1)"
+            />
+            <Background variant="dots" gap={20} size={1} color="#e5e7eb" />
+
+            {/* Action buttons in top-right corner with proper z-index */}
+            <Panel position="top-right" className="flex gap-3 p-4 z-40">
+              <Button onClick={handleSaveFlowchart} className="bg-green-600 hover:bg-green-700 shadow-md" size="sm">
+                Save Flowchart
+              </Button>
+              <Button
+                onClick={() => setTestPathwayOpen(true)}
+                className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2 shadow-md"
+                size="sm"
               >
-                <div className="text-xs text-gray-600">
-                  <div>Nodes: {nodes.length}</div>
-                  <div>Edges: {edges.length}</div>
-                  <div>Phone: {phoneNumber || "None"}</div>
-                  <div>Pathway ID: {existingPathwayId || "None"}</div>
-                  <div>API Key: {apiKey ? "Set" : "Missing"}</div>
-                  <div>User: {user?.email || "None"}</div>
-                  <div className="text-xs font-medium mt-1">
-                    Status: {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
-                  </div>
+                <Play className="h-4 w-4" />
+                Test Pathway
+              </Button>
+              {blandPayload && <JsonPreview data={blandPayload} title="Bland.ai Pathway JSON" />}
+              <Button onClick={handleDeploy} className="bg-blue-600 hover:bg-blue-700 shadow-md" size="sm">
+                {existingPathwayId ? "Update Pathway" : "Deploy to Bland.ai"}
+              </Button>
+            </Panel>
+
+            {/* Debug info panel - positioned to avoid overlap */}
+            <Panel
+              position="bottom-left"
+              className="flex flex-col gap-2 p-4 bg-white border border-gray-200 rounded-lg shadow-sm z-30"
+            >
+              <div className="text-xs text-gray-600">
+                <div>Nodes: {nodes.length}</div>
+                <div>Edges: {edges.length}</div>
+                <div>Phone: {phoneNumber || "None"}</div>
+                <div>Pathway ID: {existingPathwayId || "None"}</div>
+                <div>API Key: {apiKey ? "Set" : "Missing"}</div>
+                <div>User: {user?.email || "None"}</div>
+                <div className="text-xs font-medium mt-1">
+                  Status: {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
                 </div>
-              </Panel>
-            </ReactFlow>
-          </div>
+              </div>
+            </Panel>
+          </ReactFlow>
         </div>
       </div>
+
+      <AddNodePanel
+        isOpen={isAddNodePanelOpen}
+        onClose={() => setIsAddNodePanelOpen(false)}
+        onAddNode={handleAddNode}
+      />
 
       <NodeEditorDrawer
         isOpen={isNodeEditorOpen}
         onClose={handleCloseNodeEditor}
         selectedNode={selectedNodeForEdit}
         onUpdateNode={handleUpdateNode}
+      />
+
+      <EdgeEditorDrawer
+        isOpen={isEdgeEditorOpen}
+        onClose={handleCloseEdgeEditor}
+        selectedEdge={selectedEdgeForEdit}
+        onUpdateEdge={handleUpdateEdge}
       />
 
       {testPathwayOpen && reactFlowInstance && (
@@ -795,6 +744,20 @@ function FlowchartBuilderComponent({
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+// Wrapper component with ReactFlowProvider
+function FlowchartBuilderComponent(props: {
+  phoneNumber?: string
+  initialPathwayId?: string | null
+  initialPathwayName?: string | null
+  initialData?: any
+}) {
+  return (
+    <ReactFlowProvider>
+      <FlowchartBuilderInner {...props} />
+    </ReactFlowProvider>
   )
 }
 

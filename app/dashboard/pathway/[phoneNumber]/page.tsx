@@ -237,45 +237,34 @@ export default function PathwayEditorPage({ params, searchParams }: PathwayEdito
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => router.push("/dashboard/pathway")}>
-            <ArrowLeft className="h-5 w-5" />
+      {/* Compact Top Bar */}
+      <div className="flex items-center justify-between px-6 py-3 border-b bg-white z-50">
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="sm" onClick={() => router.push("/dashboard/pathway")} className="h-8 w-8 p-0">
+            <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h1 className="text-2xl font-bold">Pathway for {formattedNumber}</h1>
-          {isLoadingPathway ? (
-            <div className="text-sm text-gray-500">Loading pathway info...</div>
-          ) : pathwayInfo?.pathway_id ? (
-            <div className="text-sm text-gray-600">
-              Pathway: {pathwayInfo.pathway_name || pathwayInfo.pathway_id}
-              {pathwayInfo.last_deployed_at && (
-                <span className="ml-2">
-                  (Last deployed: {new Date(pathwayInfo.last_deployed_at).toLocaleDateString()})
-                </span>
-              )}
-            </div>
-          ) : (
-            <div className="text-sm text-gray-500">
-              Status: <span className="font-medium text-blue-600">Will Create New Pathway</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold text-gray-900">Pathway for {formattedNumber}</h1>
+            {pathwayInfo?.pathway_name && (
+              <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded">{pathwayInfo.pathway_name}</span>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2" onClick={handleAIGeneratorClick}>
-            <Sparkles className="h-4 w-4" />
-            AI Generator
-          </Button>
-        </div>
+        <Button variant="outline" className="gap-2 text-sm bg-transparent" onClick={handleAIGeneratorClick}>
+          <Sparkles className="h-4 w-4" />
+          AI Generator
+        </Button>
       </div>
 
       {error && (
-        <div className="p-4 bg-red-50 border-b border-red-200">
-          <div className="text-red-800">
+        <div className="px-6 py-2 bg-red-50 border-b border-red-200">
+          <div className="text-sm text-red-800">
             <strong>Error:</strong> {error}
           </div>
         </div>
       )}
 
+      {/* Full-height FlowchartBuilder */}
       <div className="flex-1 overflow-hidden">
         <FlowchartBuilder
           phoneNumber={phoneNumber}

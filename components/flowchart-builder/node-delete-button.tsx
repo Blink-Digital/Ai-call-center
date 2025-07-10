@@ -2,46 +2,52 @@
 
 import type React from "react"
 
-import { useCallback } from "react"
-import { useReactFlow } from "reactflow"
 import { Trash2 } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/use-toast"
-import { motion } from "framer-motion"
 
 interface NodeDeleteButtonProps {
   nodeId: string
+  onDelete: (nodeId: string) => void
+  isStart?: boolean
+  isDefault?: boolean
+  deletable?: boolean
 }
 
-export function NodeDeleteButton({ nodeId }: NodeDeleteButtonProps) {
-  const { setNodes, getNode } = useReactFlow()
+export function NodeDeleteButton({ nodeId, onDelete, isStart, isDefault, deletable = true }: NodeDeleteButtonProps) {
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
 
-  const handleDelete = useCallback(
-    (event: React.MouseEvent) => {
-      event.stopPropagation()
-
-      // Get the node to show its type in the toast
-      const node = getNode(nodeId)
-      const nodeType = node?.type || "Node"
-
-      setNodes((nodes) => nodes.filter((node) => node.id !== nodeId))
-
+    // Prevent deletion of start/default nodes
+    if (isStart || isDefault || !deletable) {
       toast({
-        title: `${nodeType} deleted`,
-        description: "The node has been removed from the flowchart.",
+        title: "Cannot delete node",
+        description: "This is a protected start node and cannot be deleted.",
+        variant: "destructive",
       })
-    },
-    [nodeId, setNodes, getNode],
-  )
+      return
+    }
+
+    onDelete(nodeId)
+    toast({
+      title: "Node deleted",
+      description: "The node has been removed from your flowchart.",
+    })
+  }
+
+  // Don't show delete button for protected nodes
+  if (isStart || isDefault || !deletable) {
+    return null
+  }
 
   return (
-    <motion.button
-      className="absolute -top-3 -right-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-red-500 text-white shadow-md hover:bg-red-600 transition-colors"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={handleDelete}
-      title="Delete node"
-      whileHover={{ scale: 1.1 }}
-      whileTap={{ scale: 0.95 }}
+      className="absolute -top-2 -right-2 h-6 w-6 p-0 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
     >
-      <Trash2 size={14} />
-    </motion.button>
+      <Trash2 className="h-3 w-3" />
+    </Button>
   )
 }

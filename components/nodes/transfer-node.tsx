@@ -8,63 +8,40 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { ChevronDown, ChevronUp, Phone, Globe } from "lucide-react"
+import { Phone } from "lucide-react"
 import { NodeDeleteButton } from "@/components/flowchart-builder/node-delete-button"
 import { NodeDuplicateButton } from "@/components/flowchart-builder/node-duplicate-button"
 import { Switch } from "@/components/ui/switch"
 
 interface TransferNodeProps {
-  data: any // Using any to handle potentially undefined data
+  data: any
   id: string
   selected: boolean
 }
 
 export default function TransferNode({ data = {}, id, selected }: TransferNodeProps) {
-  // Initialize with default values if data properties are undefined
   const [isEditing, setIsEditing] = useState(false)
-  const [phoneNumber, setPhoneNumber] = useState(data?.transferNumber || data?.phoneNumber || "+1")
-  const [transferType, setTransferType] = useState<"warm" | "cold">(data?.transferType || "warm")
-  const [webhookUrl, setWebhookUrl] = useState(data?.webhookUrl || "")
-  const [webhookMethod, setWebhookMethod] = useState(data?.webhookMethod || "POST")
-  const [webhookBody, setWebhookBody] = useState(
-    data?.webhookBody || '{\n  "callId": "{{callId}}",\n  "campaign": "{{campaign}}"\n}',
-  )
-  const [isWebhookOpen, setIsWebhookOpen] = useState(false)
-  const [nodeText, setNodeText] = useState(data?.text || "Transferring your call now...")
-  // Add a webhookDescription field to the component state
-  const [webhookDescription, setWebhookDescription] = useState(
-    data?.webhookDescription || "Fetch customer data and trigger Facebook Pixel",
-  )
-  // Add a new state variable for tracking if webhook is enabled
-  const [isWebhookEnabled, setIsWebhookEnabled] = useState(!!data?.webhookUrl)
+
+  // Basic fields only - simplified for Bland.ai compatibility
+  const [nodeTitle, setNodeTitle] = useState(data?.nodeTitle || "")
+  const [useStaticPrompt, setUseStaticPrompt] = useState(data?.useStaticPrompt !== false)
+  const [prompt, setPrompt] = useState(data?.text || "Let me transfer you to the right department.")
+  const [transferType, setTransferType] = useState(data?.transferType || "Phone Number")
+  const [transferNumber, setTransferNumber] = useState(data?.phone || "+1")
 
   // Ensure data object exists
   if (!data) {
     data = {}
   }
 
-  // Update the handleSave function to only save webhook data if it's enabled
   const handleSave = () => {
-    // Update the node data
-    data.transferNumber = phoneNumber
-    data.phoneNumber = phoneNumber // Set both for compatibility
+    // Update the node data with Bland.ai compatible structure
+    data.nodeTitle = nodeTitle
+    data.useStaticPrompt = useStaticPrompt
+    data.text = useStaticPrompt ? prompt : ""
     data.transferType = transferType
-    data.text = nodeText // Ensure text field is always set
-
-    // Only include webhook data if the webhook is enabled
-    if (isWebhookEnabled) {
-      data.webhookUrl = webhookUrl
-      data.webhookMethod = webhookMethod
-      data.webhookBody = webhookBody
-      data.webhookDescription = webhookDescription
-    } else {
-      // Remove webhook data if disabled
-      data.webhookUrl = ""
-      data.webhookMethod = undefined
-      data.webhookBody = undefined
-      data.webhookDescription = undefined
-    }
+    data.phone = transferType === "Phone Number" ? transferNumber : ""
+    data.isGlobal = false // Always false for transfer nodes
 
     setIsEditing(false)
   }
@@ -83,41 +60,47 @@ export default function TransferNode({ data = {}, id, selected }: TransferNodePr
         <div className="bg-amber-900 text-white px-3 py-1 rounded-t-md flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Phone size={16} />
-            <span>Transfer</span>
+            <span>Transfer Call</span>
           </div>
-          <span>{data.label || "Call Transfer"}</span>
+          <span>{data.nodeTitle || nodeTitle || "Call Transfer"}</span>
         </div>
 
         {!isEditing ? (
           <div className="bg-white p-3 rounded-b-md">
             <div className="mb-2">
-              <span className="text-sm font-medium">Message:</span>
+              <span className="text-sm font-medium">Node Title:</span>
               <div className="mt-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded text-sm">
-                {data.text || "Transferring your call now..."}
+                {data.nodeTitle || nodeTitle || "Unnamed Transfer"}
               </div>
             </div>
 
             <div className="mb-2">
-              <span className="text-sm font-medium">Transfer Type:</span>
+              <span className="text-sm font-medium">Static Prompt:</span>
               <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-sm">
-                {data.transferType === "warm" ? "Warm Transfer" : "Cold Transfer"}
+                {data.useStaticPrompt !== false ? "Enabled" : "Disabled"}
               </span>
             </div>
 
-            <div className="mb-3">
-              <span className="text-sm font-medium">Phone Number:</span>
-              <div className="mt-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded text-sm font-mono">
-                {data.transferNumber || data.phoneNumber || "No phone number set"}
+            {data.useStaticPrompt !== false && (
+              <div className="mb-2">
+                <span className="text-sm font-medium">Prompt:</span>
+                <div className="mt-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded text-sm">
+                  {data.text || prompt || "Let me transfer you to the right department."}
+                </div>
               </div>
+            )}
+
+            <div className="mb-2">
+              <span className="text-sm font-medium">Transfer Type:</span>
+              <span className="ml-2 px-2 py-0.5 bg-gray-100 rounded text-sm">{data.transferType || transferType}</span>
             </div>
 
-            {(data.webhookUrl || data.webhookUrl === "") && (
-              <div className="mb-2">
-                <div className="flex items-center gap-1 text-sm font-medium text-gray-700">
-                  <Globe size={14} />
-                  <span>Webhook {data.webhookUrl ? "enabled" : "disabled"}</span>
+            {(data.transferType === "Phone Number" || transferType === "Phone Number") && (
+              <div className="mb-3">
+                <span className="text-sm font-medium">Phone Number:</span>
+                <div className="mt-1 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded text-sm font-mono">
+                  {data.phone || transferNumber || "No phone number set"}
                 </div>
-                {data.webhookUrl && <div className="mt-1 text-xs text-gray-500 truncate">{data.webhookUrl}</div>}
               </div>
             )}
 
@@ -129,123 +112,79 @@ export default function TransferNode({ data = {}, id, selected }: TransferNodePr
           <Card className="border-0 shadow-none">
             <CardContent className="p-3 bg-white rounded-b-md">
               <div className="space-y-4">
+                {/* Node Title */}
                 <div className="space-y-2">
-                  <Label htmlFor={`text-${id}`}>Message</Label>
-                  <Textarea
-                    id={`text-${id}`}
-                    value={nodeText}
-                    onChange={(e) => setNodeText(e.target.value)}
-                    placeholder="Transferring your call now..."
-                    rows={2}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor={`phone-${id}`}>Phone Number</Label>
+                  <Label htmlFor={`node-title-${id}`}>Node Title</Label>
                   <Input
-                    id={`phone-${id}`}
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    placeholder="+18005551234"
+                    id={`node-title-${id}`}
+                    value={nodeTitle}
+                    onChange={(e) => setNodeTitle(e.target.value)}
+                    placeholder="Internal label (not spoken)"
                   />
+                  <p className="text-xs text-gray-500">Internal label for organization purposes.</p>
                 </div>
 
+                {/* Static Prompt Toggle */}
+                <div className="space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch id={`static-prompt-${id}`} checked={useStaticPrompt} onCheckedChange={setUseStaticPrompt} />
+                    <Label htmlFor={`static-prompt-${id}`}>Use Static Prompt</Label>
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    When enabled, use the specific prompt below instead of AI-generated text.
+                  </p>
+                </div>
+
+                {/* Prompt - only show when static prompt is enabled */}
+                {useStaticPrompt && (
+                  <div className="space-y-2">
+                    <Label htmlFor={`prompt-${id}`}>Prompt</Label>
+                    <Textarea
+                      id={`prompt-${id}`}
+                      value={prompt}
+                      onChange={(e) => setPrompt(e.target.value)}
+                      placeholder="Let me transfer you to the right department."
+                      rows={3}
+                    />
+                    <p className="text-xs text-gray-500">What the AI will say before transferring the call.</p>
+                  </div>
+                )}
+
+                {/* Transfer Type */}
                 <div className="space-y-2">
-                  <Label htmlFor={`type-${id}`}>Transfer Type</Label>
-                  <Select value={transferType} onValueChange={(value) => setTransferType(value as "warm" | "cold")}>
-                    <SelectTrigger id={`type-${id}`}>
+                  <Label htmlFor={`transfer-type-${id}`}>Transfer Type</Label>
+                  <Select value={transferType} onValueChange={setTransferType}>
+                    <SelectTrigger id={`transfer-type-${id}`}>
                       <SelectValue placeholder="Select transfer type" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="warm">Warm Transfer</SelectItem>
-                      <SelectItem value="cold">Cold Transfer</SelectItem>
+                      <SelectItem value="Phone Number">Phone Number</SelectItem>
+                      <SelectItem value="Phone Tree">Phone Tree</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
-                <Collapsible
-                  open={isWebhookOpen}
-                  onOpenChange={setIsWebhookOpen}
-                  className="border border-gray-200 rounded-md"
-                >
-                  <CollapsibleTrigger className="flex w-full items-center justify-between p-2 hover:bg-gray-50">
-                    <div className="flex items-center gap-2">
-                      <Globe size={16} />
-                      <span className="font-medium">Webhook Configuration</span>
-                    </div>
-                    {isWebhookOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="p-3 border-t border-gray-200 space-y-3">
-                    <div className="flex items-center space-x-2">
-                      <Switch
-                        id={`webhook-enabled-${id}`}
-                        checked={isWebhookEnabled}
-                        onCheckedChange={setIsWebhookEnabled}
-                      />
-                      <Label htmlFor={`webhook-enabled-${id}`}>Enable webhook</Label>
-                    </div>
+                {/* Transfer Number - only show when Phone Number is selected */}
+                {transferType === "Phone Number" && (
+                  <div className="space-y-2">
+                    <Label htmlFor={`transfer-number-${id}`}>Transfer Number</Label>
+                    <Input
+                      id={`transfer-number-${id}`}
+                      value={transferNumber}
+                      onChange={(e) => setTransferNumber(e.target.value)}
+                      placeholder="+1234567890"
+                    />
+                    <p className="text-xs text-gray-500">The phone number to transfer the call to.</p>
+                  </div>
+                )}
 
-                    {isWebhookEnabled && (
-                      <>
-                        <div className="space-y-2">
-                          <Label htmlFor={`webhook-url-${id}`}>Webhook URL</Label>
-                          <Input
-                            id={`webhook-url-${id}`}
-                            value={webhookUrl}
-                            onChange={(e) => setWebhookUrl(e.target.value)}
-                            placeholder="https://example.com/webhook"
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor={`webhook-method-${id}`}>HTTP Method</Label>
-                          <Select value={webhookMethod} onValueChange={setWebhookMethod}>
-                            <SelectTrigger id={`webhook-method-${id}`}>
-                              <SelectValue placeholder="Select HTTP method" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="GET">GET</SelectItem>
-                              <SelectItem value="POST">POST</SelectItem>
-                              <SelectItem value="PUT">PUT</SelectItem>
-                              <SelectItem value="PATCH">PATCH</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label htmlFor={`webhook-body-${id}`}>Request Body</Label>
-                          <Textarea
-                            id={`webhook-body-${id}`}
-                            value={webhookBody}
-                            onChange={(e) => setWebhookBody(e.target.value)}
-                            placeholder='{"callId": "{{callId}}", "campaign": "{{campaign}}"}'
-                            rows={5}
-                            className="font-mono text-sm"
-                          />
-                          <p className="text-xs text-gray-500">
-                            You can use variables like {`{{`}callId{`}}`}, {`{{`}campaign{`}}`}, etc.
-                          </p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor={`webhook-description-${id}`}>Webhook Description</Label>
-                          <Input
-                            id={`webhook-description-${id}`}
-                            value={webhookDescription}
-                            onChange={(e) => setWebhookDescription(e.target.value)}
-                            placeholder="Fetch customer data and trigger Facebook Pixel"
-                          />
-                        </div>
-                      </>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-
-                <div className="flex justify-end gap-2 pt-2">
+                {/* Action Buttons */}
+                <div className="flex justify-end gap-2 pt-4 border-t border-gray-200">
                   <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
                     Cancel
                   </Button>
-                  <Button size="sm" onClick={handleSave}>
-                    Save
+                  <Button size="sm" onClick={handleSave} className="bg-blue-600 hover:bg-blue-700">
+                    Save Node
                   </Button>
                 </div>
               </div>

@@ -22,7 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
           <AuthProvider>
             <Navbar />
-            <main className="min-h-screen pt-16">{children}</main>
+            <main className="min-h-screen">{children}</main>
             <Toaster />
           </AuthProvider>
         </ThemeProvider>

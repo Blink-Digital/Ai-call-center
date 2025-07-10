@@ -1,252 +1,162 @@
 import type { Node, Edge } from "reactflow"
 
-// Map Bland.ai node types to our custom node types
-function mapBlandTypeToNodeType(blandType: string): string {
-  switch (blandType) {
-    case "Default":
-      return "greetingNode" // We'll determine if it's greeting, question, or response later
-    case "End Call":
-      return "endCallNode"
-    case "Transfer Node":
-      return "transferNode"
-    case "Webhook":
-      return "webhookNode"
-    default:
-      return "responseNode" // Default fallback
-  }
+export interface BlandPathwayNode {
+  id: string
+  type: string
+  data: any
+  position?: { x: number; y: number }
 }
 
-// Refine node type based on data and connections
-function refineNodeType(node: any, blandNodes: any[], blandEdges: any[]): string {
-  const baseType = mapBlandTypeToNodeType(node.type || "Default")
-
-  // If it's already a specific type, return it
-  if (baseType !== "greetingNode") {
-    return baseType
-  }
-
-  // Check if this is a start node
-  if (node.data?.isStart) {
-    return "greetingNode"
-  }
-
-  // Check incoming edges to determine if it's a customer response node
-  const incomingEdges = blandEdges.filter((edge) => edge.target === node.id)
-  const outgoingEdges = blandEdges.filter((edge) => edge.source === node.id)
-
-  // If it has multiple outgoing edges with different conditions, it's likely a customer response node
-  if (outgoingEdges.length > 1) {
-    const uniqueConditions = new Set(outgoingEdges.map((edge) => edge.condition || edge.label))
-    if (uniqueConditions.size > 1) {
-      return "customerResponseNode"
-    }
-  }
-
-  // If it has no incoming edges, it's likely a greeting node
-  if (incomingEdges.length === 0) {
-    return "greetingNode"
-  }
-
-  // If it has incoming edges from a customer response node, it's likely a response node
-  if (
-    incomingEdges.some((edge) => {
-      const sourceNode = blandNodes.find((n) => n.id === edge.source)
-      return sourceNode && mapBlandTypeToNodeType(sourceNode.type || "") === "customerResponseNode"
-    })
-  ) {
-    return "responseNode"
-  }
-
-  // If it has outgoing edges to a customer response node, it's likely a question node
-  if (
-    outgoingEdges.some((edge) => {
-      const targetNode = blandNodes.find((n) => n.id === edge.target)
-      return targetNode && mapBlandTypeToNodeType(targetNode.type || "") === "customerResponseNode"
-    })
-  ) {
-    return "questionNode"
-  }
-
-  // Default to response node if we can't determine
-  return "responseNode"
+export interface BlandPathwayEdge {
+  id: string
+  source: string
+  target: string
+  data?: any
 }
 
-export function convertBlandFormatToFlowchart(blandData: any) {
-  // Ensure we have valid data
-  if (!blandData || !blandData.nodes || !Array.isArray(blandData.nodes)) {
-    throw new Error("Invalid JSON format: Missing or invalid nodes array")
-  }
+export interface BlandPathway {
+  nodes: BlandPathwayNode[]
+  edges: BlandPathwayEdge[]
+  name?: string
+  description?: string
+}
 
-  if (!blandData.edges || !Array.isArray(blandData.edges)) {
-    // If edges are missing, create an empty array
-    blandData.edges = []
-  }
+/**
+ * Convert Bland.ai pathway format to ReactFlow format
+ */
+export function convertBlandToFlowchart(blandData: any): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = []
+  const edges: Edge[] = []
 
-  const { nodes: blandNodes, edges: blandEdges } = blandData
-
-  // Initial position variables for layout
-  const xPos = 50
-  const yPos = 50
-  const xOffset = 300
-  const yOffset = 200
-
-  // Convert nodes
-  const reactFlowNodes: Node[] = blandNodes.map((node: any, index: number) => {
-    // Ensure node has required properties
-    if (!node.id) {
-      node.id = `node_${index}`
-    }
-
-    if (!node.type) {
-      node.type = "Default"
-    }
-
-    if (!node.data) {
-      node.data = {}
-    }
-
-    // Determine node type
-    const initialType = mapBlandTypeToNodeType(node.type)
-
-    // Create base node data with safe access to properties
-    let nodeData: any = {
-      text: node.data?.text || `Node ${index + 1}`,
-    }
-
-    // Add type-specific data
-    switch (node.type) {
-      case "Webhook":
-        nodeData = {
-          ...nodeData,
-          url: node.data?.url || "https://example.com/webhook",
-          method: node.data?.method || "POST",
-          body: node.data?.body || "{}",
-          extractVars: node.data?.extractVars || [
-            ["response", "string", "The response from the webhook"],
-            ["status", "number", "The HTTP status code"],
-          ],
-        }
-        break
-      case "Transfer Node":
-        nodeData = {
-          ...nodeData,
-          transferNumber: node.data?.transferNumber || "+1234567890",
-          phoneNumber: node.data?.transferNumber || "+1234567890", // For compatibility
-          transferType: node.data?.transferType || "warm",
-        }
-        break
-    }
-
-    // Calculate position (simple grid layout)
-    const position = {
-      x: xPos + (index % 3) * xOffset,
-      y: yPos + Math.floor(index / 3) * yOffset,
-    }
-
+  // Handle different Bland.ai data structures
+  if (blandData.pathway) {
+    // If data has pathway property
+    return convertPathwayNodes(blandData.pathway)
+  } else if (blandData.nodes && blandData.edges) {
+    // If data already has nodes and edges
     return {
-      id: node.id,
-      type: initialType, // We'll refine this later
-      position,
-      data: nodeData,
+      nodes: blandData.nodes.map(convertBlandNodeToReactFlow),
+      edges: blandData.edges.map(convertBlandEdgeToReactFlow),
+    }
+  } else if (Array.isArray(blandData)) {
+    // If data is an array of nodes
+    return convertNodeArray(blandData)
+  }
+
+  return { nodes, edges }
+}
+
+function convertPathwayNodes(pathway: any): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = []
+  const edges: Edge[] = []
+
+  // Convert pathway structure to nodes and edges
+  Object.entries(pathway).forEach(([nodeId, nodeData]: [string, any], index) => {
+    const node: Node = {
+      id: nodeId,
+      type: mapBlandTypeToReactFlow(nodeData.type || "response"),
+      position: { x: 200 + (index % 3) * 300, y: 100 + Math.floor(index / 3) * 200 },
+      data: {
+        text: nodeData.message || nodeData.text || `Node ${nodeId}`,
+        ...nodeData,
+      },
+    }
+
+    nodes.push(node)
+
+    // Create edges based on next property
+    if (nodeData.next) {
+      if (typeof nodeData.next === "string") {
+        edges.push({
+          id: `${nodeId}-${nodeData.next}`,
+          source: nodeId,
+          target: nodeData.next,
+          type: "default",
+        })
+      } else if (Array.isArray(nodeData.next)) {
+        nodeData.next.forEach((nextId: string, idx: number) => {
+          edges.push({
+            id: `${nodeId}-${nextId}-${idx}`,
+            source: nodeId,
+            target: nextId,
+            type: "default",
+          })
+        })
+      }
     }
   })
 
-  // Refine node types based on connections
-  reactFlowNodes.forEach((node: any) => {
-    node.type = refineNodeType(node, blandNodes, blandEdges)
+  return { nodes, edges }
+}
 
-    // Special handling for customer response nodes
-    if (node.type === "customerResponseNode") {
-      // Extract response options from outgoing edges
-      const outgoingEdges = blandEdges.filter((edge: any) => edge.source === node.id)
-      const responseOptions = outgoingEdges.map((edge: any) => edge.label || edge.condition || "Option").filter(Boolean) // Filter out undefined/null values
+function convertNodeArray(nodeArray: any[]): { nodes: Node[]; edges: Edge[] } {
+  const nodes: Node[] = nodeArray.map((nodeData, index) =>
+    convertBlandNodeToReactFlow({
+      ...nodeData,
+      id: nodeData.id || `node-${index}`,
+      position: nodeData.position || { x: 200 + (index % 3) * 300, y: 100 + Math.floor(index / 3) * 200 },
+    }),
+  )
 
-      // If no response options found, provide defaults
-      if (!responseOptions.length) {
-        responseOptions.push("Yes", "No", "Maybe")
-      }
-
-      // Update node data with response options
-      node.data.responses = responseOptions
-      node.data.options = responseOptions
-    }
-
-    // If this is a start node with extractVars, set the variableName
-    if (node.data.isStart && node.data.extractVars && Array.isArray(node.data.extractVars)) {
-      const ageVar = node.data.extractVars.find((v: any) => v[0] === "Age" || v[0].toLowerCase() === "age")
-      if (ageVar) {
-        node.data.variableName = "Age"
-        node.data.variableType = ageVar[1] || "integer"
-        node.data.variableDescription = ageVar[2] || "Extract the age"
+  const edges: Edge[] = []
+  // Extract edges from node connections
+  nodeArray.forEach((nodeData, index) => {
+    if (nodeData.next) {
+      const sourceId = nodeData.id || `node-${index}`
+      if (typeof nodeData.next === "string") {
+        edges.push({
+          id: `${sourceId}-${nodeData.next}`,
+          source: sourceId,
+          target: nodeData.next,
+          type: "default",
+        })
       }
     }
   })
 
-  // Convert edges
-  const reactFlowEdges: Edge[] = blandEdges
-    .map((edge: any, index: number) => {
-      // Ensure edge has required properties
-      if (!edge.source || !edge.target) {
-        console.warn(`Edge at index ${index} is missing source or target`)
-        return null
-      }
+  return { nodes, edges }
+}
 
-      // Find source and target nodes
-      const sourceNode = reactFlowNodes.find((n) => n.id === edge.source)
-      const targetNode = reactFlowNodes.find((n) => n.id === edge.target)
-
-      if (!sourceNode || !targetNode) {
-        console.warn(`Edge ${edge.id || index} references non-existent node(s)`)
-        return null
-      }
-
-      // Determine source handle for customer response nodes
-      let sourceHandle = undefined
-      if (sourceNode.type === "customerResponseNode") {
-        const responseOptions = sourceNode.data.options || sourceNode.data.responses || []
-        // Look for a match between the edge label and response options
-        const responseIndex = responseOptions.findIndex(
-          (option: string) => option === edge.label || option === edge.condition,
-        )
-        if (responseIndex >= 0) {
-          sourceHandle = `response-${responseIndex}`
-        }
-      } else if (sourceNode.type === "conditionalNode") {
-        // Determine source handle for conditional nodes
-        if (
-          edge.label === "Yes" ||
-          edge.condition === "Yes" ||
-          (edge.label && edge.label.includes("<=")) ||
-          (edge.condition && edge.condition.includes("<="))
-        ) {
-          sourceHandle = "true"
-        } else if (
-          edge.label === "No" ||
-          edge.condition === "No" ||
-          (edge.label && edge.label.includes(">")) ||
-          (edge.condition && edge.condition.includes(">"))
-        ) {
-          sourceHandle = "false"
-        }
-      }
-
-      return {
-        id: edge.id || `edge-${index}`,
-        source: edge.source,
-        target: edge.target,
-        sourceHandle,
-        type: "custom",
-        data: {
-          label: edge.label || edge.condition || "next",
-        },
-      }
-    })
-    .filter(Boolean) as Edge[]
-
+function convertBlandNodeToReactFlow(blandNode: any): Node {
   return {
-    nodes: reactFlowNodes,
-    edges: reactFlowEdges,
-    name: blandData.name || "Imported Flowchart",
-    description: blandData.description || "Imported from Bland.ai JSON",
+    id: blandNode.id,
+    type: mapBlandTypeToReactFlow(blandNode.type),
+    position: blandNode.position || { x: 0, y: 0 },
+    data: {
+      text: blandNode.message || blandNode.text || blandNode.data?.text || "Node",
+      ...blandNode.data,
+      ...blandNode,
+    },
   }
 }
+
+function convertBlandEdgeToReactFlow(blandEdge: any): Edge {
+  return {
+    id: blandEdge.id,
+    source: blandEdge.source,
+    target: blandEdge.target,
+    type: "default",
+    data: blandEdge.data,
+  }
+}
+
+function mapBlandTypeToReactFlow(blandType: string): string {
+  const typeMap: Record<string, string> = {
+    greeting: "greetingNode",
+    question: "questionNode",
+    response: "responseNode",
+    "customer-response": "customerResponseNode",
+    "end-call": "endCallNode",
+    transfer: "transferNode",
+    webhook: "webhookNode",
+    conditional: "conditionalNode",
+    zapier: "zapierNode",
+    "facebook-lead": "facebookLeadNode",
+    "google-lead": "googleLeadNode",
+  }
+
+  return typeMap[blandType] || "responseNode"
+}
+
+// Backward compatibility
+export const convertBlandFormatToFlowchart = convertBlandToFlowchart

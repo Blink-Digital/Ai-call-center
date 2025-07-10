@@ -1,12 +1,33 @@
 "use client"
 
 import { useState } from "react"
+import { usePathname } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Menu, X } from "lucide-react"
+import { useAuth } from "@/contexts/auth-context"
 
 export function Navbar() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const pathname = usePathname()
+  const { user } = useAuth()
+
+  // Define app routes where navbar should be hidden
+  const isAppRoute =
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/pathway") ||
+    pathname.startsWith("/debug") ||
+    pathname.startsWith("/flowchart")
+
+  // Hide navbar if user is logged in and on an app route
+  if (user && isAppRoute) {
+    return null
+  }
+
+  // Also hide on login/signup pages for cleaner experience
+  if (pathname === "/login" || pathname === "/signup" || pathname === "/reset-password") {
+    return null
+  }
 
   return (
     <header className="fixed w-full z-50 bg-gradient-to-r from-gray-900 to-gray-800 border-b border-gray-800">
@@ -37,14 +58,20 @@ export function Navbar() {
             <Link href="/resources" className="text-gray-300 hover:text-white transition-colors">
               Resources
             </Link>
-            <>
-              <Link href="/login" className="text-gray-300 hover:text-white transition-colors">
-                Login
+            {!user ? (
+              <>
+                <Link href="/login" className="text-gray-300 hover:text-white transition-colors">
+                  Login
+                </Link>
+                <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white">
+                  <Link href="/signup">Request Demo</Link>
+                </Button>
+              </>
+            ) : (
+              <Link href="/dashboard" className="text-gray-300 hover:text-white transition-colors">
+                Dashboard
               </Link>
-              <Button className="bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white">
-                Request Demo
-              </Button>
-            </>
+            )}
           </nav>
 
           {/* Mobile menu button */}
@@ -89,18 +116,30 @@ export function Navbar() {
             >
               Resources
             </Link>
-            <Link
-              href="/login"
-              className="block px-3 py-2 text-base font-medium text-gray-300 hover:text-white hover:bg-gray-800 rounded-md"
-              onClick={() => setIsMenuOpen(false)}
-            >
-              Login
-            </Link>
-            <div className="px-3 py-2">
-              <Button className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white">
-                Request Demo
-              </Button>
-            </div>
+            {!user ? (
+              <>
+                <Link
+                  href="/login"
+                  className="block px-3 py-2 text-base font-medium text-gray-300 hover:text-white hover:bg-gray-800 rounded-md"
+                  onClick={() => setIsMenuOpen(false)}
+                >
+                  Login
+                </Link>
+                <div className="px-3 py-2">
+                  <Button className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white">
+                    <Link href="/signup">Request Demo</Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Link
+                href="/dashboard"
+                className="block px-3 py-2 text-base font-medium text-gray-300 hover:text-white hover:bg-gray-800 rounded-md"
+                onClick={() => setIsMenuOpen(false)}
+              >
+                Dashboard
+              </Link>
+            )}
           </div>
         </div>
       )}
