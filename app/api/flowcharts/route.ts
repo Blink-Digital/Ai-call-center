@@ -1,7 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { getUserFromRequest } from "@/lib/auth-utils"
-import { createClient } from "@/lib/supabase-server"
+import { createServiceClient } from "@/lib/supabase"
 
+// Save or update a flowchart
 export async function POST(req: NextRequest) {
   try {
     const user = await getUserFromRequest(req)
@@ -15,8 +16,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Phone number and flowchart data are required" }, { status: 400 })
     }
 
-    const supabase = createClient()
+    const supabase = createServiceClient()
 
+    // Check if a flowchart already exists for this user + phone number
     const { data: existing, error: selectError } = await supabase
       .from("pathways")
       .select("id, name, description, created_at")
@@ -26,10 +28,7 @@ export async function POST(req: NextRequest) {
 
     if (selectError) {
       console.error("Error checking existing flowchart:", selectError)
-      return NextResponse.json(
-        { error: "Failed to check existing flowchart", details: selectError.message },
-        { status: 500 },
-      )
+      return NextResponse.json({ error: "Failed to check existing flowchart" }, { status: 500 })
     }
 
     const flowchartPayload = {
@@ -43,6 +42,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (existing) {
+      // Update existing flowchart
       const { data: updated, error: updateError } = await supabase
         .from("pathways")
         .update(flowchartPayload)
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
       if (updateError) {
         console.error("Error updating flowchart:", updateError)
-        return NextResponse.json({ error: "Failed to update flowchart", details: updateError.message }, { status: 500 })
+        return NextResponse.json({ error: "Failed to update flowchart" }, { status: 500 })
       }
 
       return NextResponse.json({
@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
         message: `Flowchart for ${phoneNumber} updated successfully`,
       })
     } else {
+      // Insert new flowchart
       const { data: inserted, error: insertError } = await supabase
         .from("pathways")
         .insert({
@@ -74,11 +75,12 @@ export async function POST(req: NextRequest) {
       if (insertError) {
         console.error("Error inserting flowchart:", insertError)
 
+        // Handle unique constraint violation
         if (insertError.code === "23505") {
           return NextResponse.json({ error: "A flowchart for this phone number already exists" }, { status: 409 })
         }
 
-        return NextResponse.json({ error: "Failed to save flowchart", details: insertError.message }, { status: 500 })
+        return NextResponse.json({ error: "Failed to save flowchart" }, { status: 500 })
       }
 
       return NextResponse.json({
@@ -90,13 +92,11 @@ export async function POST(req: NextRequest) {
     }
   } catch (error) {
     console.error("Error in flowchart save:", error)
-    return NextResponse.json(
-      { error: "Internal server error", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
+// Get a flowchart by phone number
 export async function GET(req: NextRequest) {
   try {
     const user = await getUserFromRequest(req)
@@ -111,7 +111,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Phone number is required" }, { status: 400 })
     }
 
-    const supabase = createClient()
+    const supabase = createServiceClient()
 
     const { data: pathway, error } = await supabase
       .from("pathways")
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error("Error fetching flowchart:", error)
-      return NextResponse.json({ error: "Failed to fetch flowchart", details: error.message }, { status: 500 })
+      return NextResponse.json({ error: "Failed to fetch flowchart" }, { status: 500 })
     }
 
     if (!pathway) {
@@ -135,9 +135,6 @@ export async function GET(req: NextRequest) {
     })
   } catch (error) {
     console.error("Error in flowchart fetch:", error)
-    return NextResponse.json(
-      { error: "Internal server error", details: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
-    )
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }

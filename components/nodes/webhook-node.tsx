@@ -1,23 +1,29 @@
 "use client"
-
-import { useState } from "react"
 import { Handle, Position } from "reactflow"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { NodeDeleteButton } from "@/components/flowchart-builder/node-delete-button"
 import { NodeDuplicateButton } from "@/components/flowchart-builder/node-duplicate-button"
-import { Webhook, Globe, Tag } from "lucide-react"
+import { Webhook, Globe, Tag, ExternalLink } from "lucide-react"
 
 export default function WebhookNode({ data, selected, id }: any) {
-  const [isEditing, setIsEditing] = useState(false)
-
-  // Get webhook details
-  const url = data?.url || "https://example.com/webhook"
-  const method = data?.method || "POST"
-  const nodeTitle = data?.nodeTitle || "Webhook Node"
-  const responsePathways = data?.responsePathways || []
+  // Safely extract data with fallbacks
+  const nodeName = data?.name || data?.nodeTitle || "New Webhook Node"
+  const url = data?.webhook?.url || data?.url || ""
+  const method = data?.webhook?.method || data?.method || "POST"
   const isGlobal = data?.isGlobal || false
   const tag = data?.tag || null
+  const pathwayAfterApiResponse = data?.pathwayAfterApiResponse || null
+  const sendSpeechDuringWebhook = data?.sendSpeechDuringWebhook || false
+
+  // Get URL hostname for display
+  const getHostname = (urlString: string) => {
+    try {
+      return new URL(urlString).hostname
+    } catch {
+      return urlString || "No URL set"
+    }
+  }
 
   return (
     <div className="relative">
@@ -52,22 +58,37 @@ export default function WebhookNode({ data, selected, id }: any) {
         </CardHeader>
         <CardContent className="p-3 bg-white">
           <div className="space-y-2">
-            <div className="text-sm font-medium">{nodeTitle}</div>
+            {/* Node Name */}
+            <div className="text-sm font-medium truncate" title={nodeName}>
+              {nodeName}
+            </div>
+
+            {/* Method and URL */}
             <div className="text-xs text-gray-600">
               <div className="flex items-center gap-1 mb-1">
                 <Badge variant="outline" className="text-xs px-1 py-0">
                   {method}
                 </Badge>
-                <span className="truncate">{new URL(url).hostname}</span>
+                <span className="truncate">{getHostname(url)}</span>
+                {url && <ExternalLink className="w-3 h-3 text-gray-400" />}
               </div>
-              <div className="text-xs text-gray-500 truncate">{url}</div>
+              {url && (
+                <div className="text-xs text-gray-500 truncate" title={url}>
+                  {url}
+                </div>
+              )}
             </div>
 
-            {/* Response Pathways Indicator */}
-            {responsePathways.length > 0 && (
+            {/* Response Routing Indicator */}
+            {pathwayAfterApiResponse && (
               <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                {responsePathways.length} response pathway{responsePathways.length !== 1 ? "s" : ""}
+                Routes to: {pathwayAfterApiResponse.targetNodeId || "Not set"}
               </div>
+            )}
+
+            {/* Send Speech During Webhook Indicator */}
+            {sendSpeechDuringWebhook && (
+              <div className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">Speech enabled during webhook</div>
             )}
           </div>
 
@@ -75,17 +96,16 @@ export default function WebhookNode({ data, selected, id }: any) {
           <Handle type="target" position={Position.Top} className="w-3 h-3 bg-indigo-500" />
           <Handle type="source" position={Position.Bottom} className="w-3 h-3 bg-indigo-500" />
 
-          {/* Dynamic handles for response pathways */}
-          {responsePathways.map((pathway: any, index: number) => (
+          {/* Dynamic handle for response routing */}
+          {pathwayAfterApiResponse && (
             <Handle
-              key={`response-${index}`}
               type="source"
               position={Position.Right}
-              id={`response-${index}`}
+              id="response-route"
               className="w-3 h-3 bg-green-500"
-              style={{ top: `${30 + index * 20}%` }}
+              style={{ top: "50%" }}
             />
-          ))}
+          )}
         </CardContent>
       </Card>
     </div>

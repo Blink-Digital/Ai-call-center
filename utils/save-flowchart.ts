@@ -18,7 +18,6 @@ export async function saveFlowchart({
   user,
 }: SaveFlowchartParams) {
   if (!user || !phoneNumber) {
-    console.warn("[SAVE] ⚠️ User authentication or phone number missing.")
     toast({
       title: "Save failed",
       description: "User authentication or phone number missing.",
@@ -32,7 +31,7 @@ export async function saveFlowchart({
     edges,
     name: pathwayName || `Pathway for ${phoneNumber}`,
     description: pathwayDescription || `Flowchart created on ${new Date().toLocaleString()}`,
-    viewport: { x: 0, y: 0, zoom: 1 },
+    viewport: { x: 0, y: 0, zoom: 1 }, // Default viewport
   }
 
   try {
@@ -41,6 +40,7 @@ export async function saveFlowchart({
     console.log("[SAVE] 👤 User:", user.email)
     console.log("[SAVE] 📊 Data:", { nodes: nodes.length, edges: edges.length })
 
+    // Save to Supabase database
     const response = await fetch("/api/flowcharts", {
       method: "POST",
       headers: {
@@ -58,20 +58,18 @@ export async function saveFlowchart({
     const result = await response.json()
 
     if (!response.ok) {
-      console.error("[SAVE] ❌ API Error:", result.error)
       throw new Error(result.error || "Failed to save flowchart")
     }
 
+    // Also save to localStorage as backup
     const storageKey = `bland-flowchart-${phoneNumber}`
     localStorage.setItem(storageKey, JSON.stringify(flowchartData))
 
     const action = result.action === "created" ? "created" : "updated"
-    let message = ""
-    if (result.action === "created") {
-      message = `✅ New flowchart saved for ${phoneNumber}`
-    } else {
-      message = `🔄 Flowchart updated for ${phoneNumber}`
-    }
+    const message =
+      result.action === "created"
+        ? `✅ New flowchart saved for ${phoneNumber}`
+        : `🔄 Flowchart updated for ${phoneNumber}`
 
     toast({
       title: "Flowchart saved",
@@ -90,6 +88,7 @@ export async function saveFlowchart({
   } catch (error) {
     console.error("[SAVE] ❌ Error saving flowchart:", error)
 
+    // Fallback: save to localStorage only
     try {
       const storageKey = `bland-flowchart-${phoneNumber}`
       localStorage.setItem(storageKey, JSON.stringify(flowchartData))
@@ -106,7 +105,6 @@ export async function saveFlowchart({
         fallback: "localStorage",
       }
     } catch (localError) {
-      console.error("[SAVE] ❌ Error saving to localStorage:", localError)
       toast({
         title: "Save failed",
         description: error instanceof Error ? error.message : "Failed to save flowchart",
@@ -123,7 +121,6 @@ export async function saveFlowchart({
 
 export async function loadFlowchart(phoneNumber: string, user: any) {
   if (!user || !phoneNumber) {
-    console.warn("[LOAD] ⚠️ User authentication or phone number missing.")
     return null
   }
 
@@ -143,7 +140,6 @@ export async function loadFlowchart(phoneNumber: string, user: any) {
     }
 
     if (!response.ok) {
-      console.error("[LOAD] ❌ API Error:", response.status, response.statusText)
       throw new Error("Failed to load flowchart from database")
     }
 
@@ -158,6 +154,7 @@ export async function loadFlowchart(phoneNumber: string, user: any) {
   } catch (error) {
     console.error("[LOAD] ❌ Error loading from database:", error)
 
+    // Fallback to localStorage
     try {
       const storageKey = `bland-flowchart-${phoneNumber}`
       const savedFlow = localStorage.getItem(storageKey)
