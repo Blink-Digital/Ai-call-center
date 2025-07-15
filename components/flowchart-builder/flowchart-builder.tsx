@@ -32,7 +32,7 @@ import { Play, Plus, Globe, Flag, Edit2 } from "lucide-react"
 import { JsonPreview } from "./json-preview"
 import { TestPathwayDialog } from "./test-pathway-dialog"
 import { useAuth } from "@/contexts/auth-context"
-import { saveFlowchart as saveFlowchartUtil } from "@/utils/save-flowchart"
+import { saveFlowchart as saveFlowchartUtil, loadFlowchart } from "@/utils/save-flowchart"
 import { useSearchParams } from "next/navigation"
 import { convertFlowchartToBlandFormat, normalizeId } from "./deploy-utils"
 
@@ -235,9 +235,18 @@ function FlowchartBuilderInner({
   const [isEdgeEditorOpen, setIsEdgeEditorOpen] = useState(false)
   const [existingPathwayId, setExistingPathwayId] = useState<string | null>(initialPathwayId || null)
 
+  // Add these new state variables after the existing ones
+  const [isLoadingFlowchart, setIsLoadingFlowchart] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [hasLoadedInitialData, setHasLoadedInitialData] = useState(false)
+
   // New state for the redesigned interface
   const [isAddNodePanelOpen, setIsAddNodePanelOpen] = useState(false)
   const [lastNodePosition, setLastNodePosition] = useState({ x: 250, y: 100 })
+
+  // Add new state variables after the existing state declarations
+  const [showDebugPayload, setShowDebugPayload] = useState(false)
+  const [debugPayload, setDebugPayload] = useState<any>(null)
 
   // Create edge types with click handler
   const edgeTypes = {
@@ -305,6 +314,84 @@ function FlowchartBuilderInner({
       }
     }
   }, [generatedParam, reactFlowInstance, setNodes, setEdges])
+
+  // Auto-load saved flowchart from database
+  useEffect(() => {
+    const loadSavedFlowchart = async () => {
+      // Only run if we have all required data and haven't loaded yet
+      if (!user || !phoneNumber || !reactFlowInstance || hasLoadedInitialData) {
+        return
+      }
+
+      // Skip if we're loading AI-generated data from URL
+      if (generatedParam) {
+        console.log("[FLOWCHART] 🤖 Skipping auto-load - AI-generated data present")
+        setHasLoadedInitialData(true)
+        return
+      }
+
+      console.log("[FLOWCHART] 🔄 Auto-loading saved flowchart...")
+      console.log("[FLOWCHART] 📞 Phone:", phoneNumber)
+      console.log("[FLOWCHART] 👤 User:", user.email)
+
+      setIsLoadingFlowchart(true)
+      setLoadError(null)
+
+      try {
+        const savedData = await loadFlowchart(phoneNumber, user)
+
+        if (savedData && savedData.data) {
+          console.log("[FLOWCHART] ✅ Loaded saved flowchart:", {
+            nodes: savedData.data.nodes?.length || 0,
+            edges: savedData.data.edges?.length || 0,
+            name: savedData.name,
+          })
+
+          // Inject the saved data into ReactFlow
+          if (savedData.data.nodes && savedData.data.nodes.length > 0) {
+            setNodes(savedData.data.nodes)
+          }
+          if (savedData.data.edges && savedData.data.edges.length > 0) {
+            setEdges(savedData.data.edges)
+          }
+
+          // Update pathway name and description if available
+          if (savedData.name && !pathwayName) {
+            setPathwayName(savedData.name)
+          }
+          if (savedData.description && !pathwayDescription) {
+            setPathwayDescription(savedData.description)
+          }
+
+          // Fit view to show all loaded nodes
+          setTimeout(() => {
+            reactFlowInstance.fitView({ padding: 0.2 })
+          }, 100)
+
+          toast({
+            title: "Flowchart loaded",
+            description: `Loaded saved flowchart with ${savedData.data.nodes?.length || 0} nodes`,
+          })
+        } else {
+          console.log("[FLOWCHART] ℹ️ No saved flowchart found - using default nodes")
+        }
+      } catch (error) {
+        console.error("[FLOWCHART] ❌ Error loading saved flowchart:", error)
+        setLoadError(error instanceof Error ? error.message : "Failed to load flowchart")
+
+        toast({
+          title: "Failed to load saved flowchart",
+          description: "Using default template. You can still create and save your flowchart.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsLoadingFlowchart(false)
+        setHasLoadedInitialData(true)
+      }
+    }
+
+    loadSavedFlowchart()
+  }, [user, phoneNumber, reactFlowInstance, hasLoadedInitialData, generatedParam, setNodes, setEdges])
 
   // Update Bland.ai payload preview
   useEffect(() => {
@@ -482,6 +569,251 @@ function FlowchartBuilderInner({
     setDeployDialogOpen(true)
   }
 
+  const handleShowDebugPayload = () => {
+    if (!reactFlowInstance) {
+      toast({
+        title: "Error",
+        description: "Flowchart not ready. Please wait a moment and try again.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (showDebugPayload) {
+      // Hide the debug payload
+      setShowDebugPayload(false)
+      setDebugPayload(null)
+    } else {
+      // Generate and show the debug payload
+      const flow = reactFlowInstance.toObject()
+      const startNodeId = nodes.find((node) => node.type === "greetingNode")?.id || nodes[0]?.id || ""
+
+      const payload = convertFlowchartToBlandFormat(
+        flow.nodes,
+        flow.edges,
+        startNodeId,
+        pathwayName,
+        pathwayDescription || `Call flow for phone number ${phoneNumber}`,
+      )
+
+      setDebugPayload(payload)
+      setShowDebugPayload(true)
+
+      toast({
+        title: "Debug payload generated",
+        description: "Review the payload structure below before updating.",
+      })
+    }
+  }
+
+  // ✅ FINAL: Comprehensive payload debugging and validation
+  const handleUpdatePathway = async () => {
+    if (!reactFlowInstance || !apiKey || !pathwayName || !existingPathwayId) {
+      toast({
+        title: "Missing required information",
+        description: "Please ensure API key, pathway name, and pathway ID are available.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    console.log("=".repeat(120))
+    console.log("[UPDATE_PATHWAY] 🚀 FINAL COMPREHENSIVE PAYLOAD VALIDATION")
+    console.log("=".repeat(120))
+
+    setIsDeploying(true)
+
+    try {
+      // Step 1: Get ReactFlow data
+      const flow = reactFlowInstance.toObject()
+      console.log("[UPDATE_PATHWAY] 📊 Step 1 - ReactFlow Raw Data:")
+      console.log("[UPDATE_PATHWAY] - Nodes count:", flow.nodes.length)
+      console.log("[UPDATE_PATHWAY] - Edges count:", flow.edges.length)
+
+      // Step 2: Find start node
+      const startNodeId = nodes.find((node) => node.type === "greetingNode")?.id || nodes[0]?.id || ""
+      console.log("[UPDATE_PATHWAY] 🎯 Step 2 - Start Node ID:", startNodeId)
+
+      // Step 3: Call convertFlowchartToBlandFormat
+      console.log("[UPDATE_PATHWAY] 🔄 Step 3 - Converting to Bland.ai format...")
+      const blandApiPayload = convertFlowchartToBlandFormat(
+        flow.nodes,
+        flow.edges,
+        startNodeId,
+        pathwayName,
+        pathwayDescription || `Call flow for phone number ${phoneNumber}`,
+      )
+
+      // Step 4: CRITICAL VALIDATION - Check payload structure
+      console.log("[UPDATE_PATHWAY] 🔍 Step 4 - PAYLOAD STRUCTURE VALIDATION:")
+      console.log("[UPDATE_PATHWAY] - Payload type:", typeof blandApiPayload)
+      console.log("[UPDATE_PATHWAY] - Payload keys:", Object.keys(blandApiPayload))
+
+      // Verify ONLY the 4 required fields exist
+      const requiredFields = ["name", "description", "nodes", "edges"]
+      const actualFields = Object.keys(blandApiPayload)
+      const extraFields = actualFields.filter((field) => !requiredFields.includes(field))
+      const missingFields = requiredFields.filter((field) => !actualFields.includes(field))
+
+      console.log(
+        "[UPDATE_PATHWAY] - Required fields present:",
+        requiredFields.every((field) => actualFields.includes(field)),
+      )
+      console.log("[UPDATE_PATHWAY] - Extra fields found:", extraFields)
+      console.log("[UPDATE_PATHWAY] - Missing fields:", missingFields)
+
+      if (extraFields.length > 0) {
+        console.error("[UPDATE_PATHWAY] ❌ CRITICAL: Extra fields detected:", extraFields)
+        throw new Error(`Payload contains disallowed fields: ${extraFields.join(", ")}`)
+      }
+
+      if (missingFields.length > 0) {
+        console.error("[UPDATE_PATHWAY] ❌ CRITICAL: Missing required fields:", missingFields)
+        throw new Error(`Payload missing required fields: ${missingFields.join(", ")}`)
+      }
+
+      // Step 5: Validate field types
+      console.log("[UPDATE_PATHWAY] ✅ Step 5 - FIELD TYPE VALIDATION:")
+      console.log("[UPDATE_PATHWAY] - name is string:", typeof blandApiPayload.name === "string")
+      console.log("[UPDATE_PATHWAY] - description is string:", typeof blandApiPayload.description === "string")
+      console.log("[UPDATE_PATHWAY] - nodes is array:", Array.isArray(blandApiPayload.nodes))
+      console.log("[UPDATE_PATHWAY] - edges is array:", Array.isArray(blandApiPayload.edges))
+
+      // Step 6: Validate nodes structure
+      console.log("[UPDATE_PATHWAY] 🔍 Step 6 - NODES VALIDATION:")
+      blandApiPayload.nodes.forEach((node: any, index: number) => {
+        const hasRequiredStructure = !!(node.id && node.type && node.data)
+        console.log(`[UPDATE_PATHWAY] - Node ${index + 1} (${node.id}):`, {
+          type: node.type,
+          hasRequiredStructure,
+          dataKeys: node.data ? Object.keys(node.data) : [],
+          isStart: node.data?.isStart,
+        })
+
+        // Validate specific node type requirements
+        if (node.type === "End Call" && !node.data?.prompt) {
+          console.error(`[UPDATE_PATHWAY] ❌ End Call node ${node.id} missing prompt field`)
+          throw new Error(`End Call node ${node.id} must have prompt field in data`)
+        }
+        if (node.type === "Transfer Call" && !node.data?.transferNumber) {
+          console.error(`[UPDATE_PATHWAY] ❌ Transfer Call node ${node.id} missing transferNumber field`)
+          throw new Error(`Transfer Call node ${node.id} must have transferNumber field in data`)
+        }
+        if (node.type === "Webhook" && (!node.data?.url || !node.data?.method)) {
+          console.error(`[UPDATE_PATHWAY] ❌ Webhook node ${node.id} missing url or method field`)
+          throw new Error(`Webhook node ${node.id} must have url and method fields in data`)
+        }
+      })
+
+      // Step 7: Validate edges structure
+      console.log("[UPDATE_PATHWAY] 🔗 Step 7 - EDGES VALIDATION:")
+      blandApiPayload.edges.forEach((edge: any, index: number) => {
+        const hasRequiredFields = !!(edge.id && edge.source && edge.target && edge.label)
+        console.log(`[UPDATE_PATHWAY] - Edge ${index + 1} (${edge.id}):`, {
+          hasRequiredFields,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label,
+        })
+
+        if (!hasRequiredFields) {
+          console.error(`[UPDATE_PATHWAY] ❌ Edge ${edge.id} missing required fields`)
+          throw new Error(`Edge ${edge.id} must have id, source, target, and label fields`)
+        }
+      })
+
+      // Step 8: Create final request payload
+      const requestPayload = {
+        apiKey,
+        pathwayId: existingPathwayId,
+        flowchart: blandApiPayload, // This is the EXACT payload for Bland.ai
+      }
+
+      console.log("[UPDATE_PATHWAY] 📤 Step 8 - FINAL REQUEST PAYLOAD:")
+      console.log("[UPDATE_PATHWAY] - Request keys:", Object.keys(requestPayload))
+      console.log("[UPDATE_PATHWAY] - Flowchart keys:", Object.keys(requestPayload.flowchart))
+
+      // Step 9: JSON serialization test
+      console.log("[UPDATE_PATHWAY] 🧪 Step 9 - JSON SERIALIZATION TEST:")
+      let serializedPayload: string
+      try {
+        serializedPayload = JSON.stringify(requestPayload)
+        console.log("[UPDATE_PATHWAY] ✅ Serialization successful")
+        console.log("[UPDATE_PATHWAY] - Serialized length:", serializedPayload.length)
+
+        // Test if it can be parsed back
+        const parsedBack = JSON.parse(serializedPayload)
+        console.log("[UPDATE_PATHWAY] ✅ Round-trip serialization test passed")
+      } catch (serializationError) {
+        console.error("[UPDATE_PATHWAY] ❌ Serialization failed:", serializationError)
+        throw new Error("Failed to serialize payload to JSON")
+      }
+
+      // Step 10: Log exact payload being sent
+      console.log("[UPDATE_PATHWAY] 📋 Step 10 - EXACT PAYLOAD TO BLAND.AI:")
+      console.log(JSON.stringify(requestPayload.flowchart, null, 2))
+
+      // Step 11: Make the API call
+      console.log("[UPDATE_PATHWAY] 🌐 Step 11 - Making API call...")
+      const response = await fetch("/api/bland-ai/update-pathway", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: serializedPayload,
+      })
+
+      console.log("[UPDATE_PATHWAY] 📡 Step 12 - API Response:")
+      console.log("[UPDATE_PATHWAY] - Status:", response.status)
+      console.log("[UPDATE_PATHWAY] - OK:", response.ok)
+
+      const result = await response.json()
+      console.log("[UPDATE_PATHWAY] 📥 Step 13 - Response Body:", result)
+
+      if (!response.ok) {
+        console.error("[UPDATE_PATHWAY] ❌ API ERROR:")
+        console.error("[UPDATE_PATHWAY] - Status:", response.status)
+        console.error("[UPDATE_PATHWAY] - Response:", result)
+
+        throw new Error(result.message || result.error || `HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      console.log("[UPDATE_PATHWAY] ✅ SUCCESS! Pathway updated successfully")
+      localStorage.setItem("bland-api-key", apiKey)
+
+      toast({
+        title: "✅ Pathway updated successfully",
+        description: `Your pathway "${pathwayName}" has been updated on Bland.ai`,
+      })
+
+      setDeployDialogOpen(false)
+      setDeploymentResult(result)
+
+      console.log("=".repeat(120))
+      console.log("[UPDATE_PATHWAY] 🎉 COMPREHENSIVE VALIDATION COMPLETED SUCCESSFULLY")
+      console.log("=".repeat(120))
+    } catch (error) {
+      console.error("=".repeat(120))
+      console.error("[UPDATE_PATHWAY] ❌ ERROR OCCURRED:")
+      console.error("=".repeat(120))
+      console.error("[UPDATE_PATHWAY] Error:", error)
+
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
+
+      toast({
+        title: "Failed to update pathway",
+        description: errorMessage,
+        variant: "destructive",
+      })
+
+      console.error("=".repeat(120))
+      console.error("[UPDATE_PATHWAY] 💥 VALIDATION FAILED")
+      console.error("=".repeat(120))
+    } finally {
+      setIsDeploying(false)
+    }
+  }
+
   const handleSaveFlowchart = async () => {
     if (!reactFlowInstance || !user || !phoneNumber) {
       toast({
@@ -524,13 +856,13 @@ function FlowchartBuilderInner({
     })
   }
 
-  // Show loading state while auth is loading
-  if (authLoading) {
+  // Show loading state while auth is loading OR while loading flowchart
+  if (authLoading || isLoadingFlowchart) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">Loading flowchart builder...</p>
+          <p className="text-gray-600">{authLoading ? "Loading flowchart builder..." : "Loading saved flowchart..."}</p>
         </div>
       </div>
     )
@@ -546,6 +878,11 @@ function FlowchartBuilderInner({
         </div>
       </div>
     )
+  }
+
+  // Show load error if present (non-blocking)
+  if (loadError && !authLoading) {
+    console.warn("[FLOWCHART] ⚠️ Load error displayed:", loadError)
   }
 
   return (
@@ -732,13 +1069,43 @@ function FlowchartBuilderInner({
                 className="col-span-3"
               />
             </div>
+
+            {/* Debug Payload Section */}
+            <div className="col-span-4 border-t pt-4">
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-sm font-medium">Debug Payload Preview</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleShowDebugPayload}
+                  className="text-xs bg-transparent"
+                >
+                  {showDebugPayload ? "Hide Debug Payload" : "Show Debug Payload"}
+                </Button>
+              </div>
+
+              {showDebugPayload && debugPayload && (
+                <div className="bg-gray-50 border rounded-lg p-4 max-h-96 overflow-auto">
+                  <div className="text-xs text-gray-600 mb-2 font-medium">
+                    Final payload that will be sent to Bland.ai:
+                  </div>
+                  <pre className="text-xs bg-white border rounded p-3 overflow-auto whitespace-pre-wrap">
+                    {JSON.stringify(debugPayload, null, 2)}
+                  </pre>
+                  <div className="text-xs text-gray-500 mt-2">
+                    Nodes: {debugPayload?.nodes?.length || 0} | Edges: {debugPayload?.edges?.length || 0}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => setDeployDialogOpen(false)}>
               Cancel
             </Button>
-            <Button disabled={!apiKey || !pathwayName || isDeploying}>
-              {isDeploying ? "Deploying..." : existingPathwayId ? "Update Pathway" : "Deploy Pathway"}
+            <Button onClick={handleUpdatePathway} disabled={!apiKey || !pathwayName || isDeploying}>
+              {isDeploying ? "Updating..." : existingPathwayId ? "Update Pathway" : "Deploy Pathway"}
             </Button>
           </div>
         </DialogContent>
