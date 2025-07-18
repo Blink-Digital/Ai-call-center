@@ -27,20 +27,8 @@ interface AddNodePanelProps {
 export function AddNodePanel({ isOpen, onClose, onAddNode }: AddNodePanelProps) {
   const [searchTerm, setSearchTerm] = useState("")
 
-  // Node types available for adding (ConditionalNode removed)
+  // Node types available for adding (Greeting node removed)
   const nodeTypes = [
-    {
-      type: "greetingNode",
-      name: "Greeting",
-      description: "Start the conversation with a greeting message",
-      icon: MessageSquare,
-      category: "Basic",
-      defaultData: {
-        text: "Hello! How can I help you today?",
-        isStart: false,
-        temperature: 0.2,
-      },
-    },
     {
       type: "questionNode",
       name: "Question",

@@ -104,14 +104,35 @@ export function NodeEditorDrawer({
   const isTransferNode = selectedNode?.type === "transferNode"
   const isEndCallNode = selectedNode?.type === "endCallNode"
   const isWebhookNode = selectedNode?.type === "webhookNode"
+  const isQuestionNode = selectedNode?.type === "questionNode"
+  const isStartNode = selectedNode?.type === "greetingNode"
 
   // Load data when node changes
   useEffect(() => {
     if (selectedNode?.data) {
       const data = selectedNode.data
-      setNodeTitle(data.nodeTitle || data.nodeName || "")
-      setUseStaticPrompt(data.useStaticPrompt !== false) // Default to true
-      setPrompt(data.text || data.prompt || "")
+      setNodeTitle(data.name || data.nodeTitle || data.nodeName || "")
+
+      // For Question/Default nodes, determine if using static prompt based on data structure
+      if (isQuestionNode) {
+        const hasPrompt = data.prompt && data.prompt.trim()
+        const hasText = data.text && data.text.trim()
+
+        if (hasPrompt) {
+          setUseStaticPrompt(true)
+          setPrompt(data.prompt)
+        } else if (hasText) {
+          setUseStaticPrompt(false)
+          setPrompt(data.text)
+        } else {
+          setUseStaticPrompt(true)
+          setPrompt("")
+        }
+      } else {
+        setUseStaticPrompt(data.useStaticPrompt !== false) // Default to true
+        setPrompt(data.text || data.prompt || "")
+      }
+
       setLoopCondition(data.loopCondition || "")
       setIsGlobal(data.isGlobal || false)
       setGlobalLabel(data.globalLabel || "")
@@ -184,7 +205,7 @@ export function NodeEditorDrawer({
       setDialogueExamples([])
       setPathwayExamples([])
     }
-  }, [selectedNode])
+  }, [selectedNode, isQuestionNode])
 
   // Variable management
   const addVariable = () => {
@@ -287,10 +308,10 @@ export function NodeEditorDrawer({
       return
     }
 
-    if (useStaticPrompt && !prompt.trim() && !isWebhookNode) {
+    if (!prompt.trim() && !isWebhookNode) {
       toast({
         title: "Prompt required",
-        description: "Please enter a prompt for the node when using static prompt.",
+        description: "Please enter a prompt for the node.",
         variant: "destructive",
       })
       return
@@ -301,14 +322,14 @@ export function NodeEditorDrawer({
     if (isEndCallNode) {
       // End Call Node - Minimal format
       updates = {
-        nodeTitle,
+        name: nodeTitle,
         text: prompt,
         prompt: prompt, // Keep both for compatibility
       }
     } else if (isTransferNode) {
       // Transfer Node - Simplified format
       updates = {
-        nodeTitle,
+        name: nodeTitle,
         text: prompt,
         transferType,
         phone: transferType === "Phone Number" ? transferNumber : "",
@@ -317,7 +338,7 @@ export function NodeEditorDrawer({
     } else if (isExtractorNode) {
       // Customer Response Node (Extractor) - Bland.ai compatible format
       updates = {
-        nodeTitle,
+        name: nodeTitle,
         text: prompt,
         extractCallInfo,
         extractionPrompt: extractCallInfo ? extractionPrompt : "",
@@ -337,10 +358,52 @@ export function NodeEditorDrawer({
       // Webhook Node - handled by WebhookNodeConfig component
       // Don't update here, let the webhook config handle it
       return
+    } else if (isQuestionNode) {
+      // Question Node (Default Node) - Fixed logic for mutually exclusive text/prompt
+      const baseUpdates: any = {
+        name: nodeTitle, // ✅ Ensure name is first property
+      }
+
+      // ✅ Mutually exclusive prompt and text - only include one, remove the other
+      if (useStaticPrompt) {
+        baseUpdates.prompt = prompt // Static prompt -> store in "prompt"
+        // Explicitly remove text field to ensure mutual exclusivity
+        baseUpdates.text = undefined
+      } else {
+        baseUpdates.text = prompt // Dynamic AI message -> store in "text"
+        // Explicitly remove prompt field to ensure mutual exclusivity
+        baseUpdates.prompt = undefined
+      }
+
+      // ✅ Only include isStart for actual start nodes, completely exclude for others
+      if (isStartNode) {
+        baseUpdates.isStart = true
+      }
+      // Note: No else clause - we completely exclude isStart from non-start nodes
+
+      // Add other optional fields
+      if (isGlobal) {
+        baseUpdates.isGlobal = isGlobal
+        baseUpdates.globalLabel = globalLabel
+      }
+
+      if (pathwayExamples.length > 0) {
+        baseUpdates.pathwayExamples = pathwayExamples
+      }
+
+      if (conditionExamples.length > 0) {
+        baseUpdates.conditionExamples = conditionExamples
+      }
+
+      if (dialogueExamples.length > 0) {
+        baseUpdates.dialogueExamples = dialogueExamples
+      }
+
+      updates = baseUpdates
     } else {
-      // Default Node - Full feature set
+      // Default Node - Full feature set (for other node types)
       updates = {
-        nodeTitle,
+        name: nodeTitle,
         useStaticPrompt,
         text: useStaticPrompt ? prompt : "",
         loopCondition,
@@ -417,7 +480,6 @@ export function NodeEditorDrawer({
   // Early return if no node is selected
   if (!selectedNode) return null
 
-  const isStartNode = selectedNode.type === "greetingNode" || selectedNode.data?.isStart || selectedNode.data?.isDefault
   const totalExamples = conditionExamples.length + dialogueExamples.length + pathwayExamples.length
 
   return (
@@ -627,7 +689,7 @@ export function NodeEditorDrawer({
                 </Collapsible>
               </>
             ) : (
-              // Default Node Editor UI - keeping existing implementation
+              // Default Node Editor UI - Fixed for Question Nodes
               <>
                 {/* General Section */}
                 <Collapsible open={generalOpen} onOpenChange={setGeneralOpen}>
@@ -657,32 +719,37 @@ export function NodeEditorDrawer({
                       <p className="text-xs text-gray-500">Internal label for organization (not spoken).</p>
                     </div>
 
-                    {/* Static Prompt Toggle */}
+                    {/* Static Prompt Toggle - Fixed for Question Nodes */}
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <div className="space-y-1">
-                          <Label className="text-sm font-medium text-gray-700">Use Static Prompt</Label>
-                          <p className="text-xs text-gray-500">When you want the agent to say a specific dialogue</p>
+                          <Label className="text-sm font-medium text-gray-700">Use Static Text</Label>
+                          <p className="text-xs text-gray-500">When you want the AI use static Text </p>
                         </div>
                         <Switch checked={useStaticPrompt} onCheckedChange={setUseStaticPrompt} />
                       </div>
 
-                      {/* Prompt - only show when static prompt is enabled */}
-                      {useStaticPrompt && (
-                        <div className="space-y-3 pl-4 border-l-2 border-blue-200 bg-blue-50/30 p-4 rounded-r-lg">
-                          <Label htmlFor="prompt" className="text-sm font-medium text-gray-700 flex items-center gap-1">
-                            Prompt <span className="text-red-500">*</span>
-                          </Label>
-                          <Textarea
-                            id="prompt"
-                            value={prompt}
-                            onChange={(e) => setPrompt(e.target.value)}
-                            placeholder="Provide a short goal/prompt for what the agent needs to do - e.g. Ask for the customer's name"
-                            className="min-h-[120px] resize-none"
-                            required
-                          />
-                        </div>
-                      )}
+                      {/* ✅ Fix 3: Always show prompt field, change label and placeholder based on toggle */}
+                      <div className="space-y-3 pl-4 border-l-2 border-blue-200 bg-blue-50/30 p-4 rounded-r-lg">
+                        
+                        <Textarea
+                          id="prompt"
+                          value={prompt}
+                          onChange={(e) => setPrompt(e.target.value)}
+                          placeholder={
+                            useStaticPrompt
+                              ? "Enter the exact message the agent should say"
+                              : "Provide a short goal/prompt for what the agent needs to do - e.g. Ask for the customer's name"
+                          }
+                          className="min-h-[120px] resize-none"
+                          required
+                        />
+                        <p className="text-xs text-gray-500">
+                          {useStaticPrompt
+                            ? "The agent will say exactly this message to the user."
+                            : "The AI will use this as guidance to generate a dynamic response."}
+                        </p>
+                      </div>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
