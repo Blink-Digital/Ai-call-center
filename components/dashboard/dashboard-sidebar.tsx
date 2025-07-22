@@ -71,24 +71,24 @@ export function DashboardSidebar() {
 
   if (!isMounted) {
     return (
-      <aside className="fixed left-0 top-0 z-40 h-screen w-16 bg-gray-50 border-r border-gray-200">
-        <div className="flex h-16 items-center justify-center border-b border-gray-200">
-          <span className="text-xl font-bold text-gray-900">B</span>
+      <aside className="fixed left-0 top-0 z-40 h-screen w-16 bg-slate-900 border-r border-slate-800">
+        <div className="flex h-16 items-center justify-center border-b border-slate-800">
+          <span className="text-xl font-bold text-white">B</span>
         </div>
       </aside>
     )
   }
 
   return (
-    <aside className="group fixed left-0 top-0 z-40 h-screen w-16 hover:w-60 bg-gray-50 border-r border-gray-200 transition-all duration-300 ease-in-out overflow-hidden">
+    <aside className="group fixed left-0 top-0 z-40 h-screen w-16 hover:w-60 bg-slate-900 border-r border-slate-800 transition-all duration-300 ease-in-out overflow-hidden">
       {/* Header */}
-      <div className="flex h-16 items-center border-b border-gray-200 px-4">
+      <div className="flex h-16 items-center border-b border-slate-800 px-4">
         <div className="flex items-center min-w-0">
           <div className="flex-shrink-0">
-            <span className="text-xl font-bold text-gray-900">B</span>
+            <span className="text-xl font-bold text-white">H</span>
           </div>
           <div className="ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100 overflow-hidden whitespace-nowrap">
-            <span className="text-xl font-bold text-gray-900">land.ai</span>
+            <span className="text-xl font-bold text-white">land.ai</span>
           </div>
         </div>
       </div>
@@ -107,17 +107,17 @@ export function DashboardSidebar() {
                 key={link.name}
                 href={link.href}
                 className={cn(
-                  "flex items-center rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-200 group/item",
+                  "flex items-center rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200 group/item",
                   isActive
-                    ? "bg-white text-blue-600 shadow-sm"
-                    : "text-gray-700 hover:bg-white hover:text-gray-900 hover:shadow-sm",
+                    ? "bg-purple-600 text-white shadow-lg shadow-purple-600/25"
+                    : "text-slate-300 hover:bg-slate-800 hover:text-white",
                 )}
               >
                 <div className="flex-shrink-0">
                   <link.icon
                     className={cn(
                       "h-5 w-5",
-                      isActive ? "text-blue-600" : "text-gray-500 group-hover/item:text-gray-700",
+                      isActive ? "text-white" : "text-slate-400 group-hover/item:text-slate-300",
                     )}
                   />
                 </div>
@@ -131,11 +131,11 @@ export function DashboardSidebar() {
       </div>
 
       {/* Profile Section - Fixed at bottom */}
-      <div className="absolute bottom-0 left-0 right-0 border-t border-gray-200 p-4 bg-gray-50" ref={dropdownRef}>
+      <div className="absolute bottom-0 left-0 right-0 border-t border-slate-800 p-4 bg-slate-900" ref={dropdownRef}>
         <div className="relative">
           <Button
             variant="ghost"
-            className="w-full flex items-center justify-start gap-3 hover:bg-white focus:bg-white px-3 py-2.5 h-auto rounded-xl"
+            className="w-full flex items-center justify-start gap-3 hover:bg-slate-800 focus:bg-slate-800 px-3 py-3 h-auto rounded-xl text-slate-300 hover:text-white"
             onClick={() => {
               console.log("🖱️ Profile dropdown clicked, current state:", isDropdownOpen)
               setIsDropdownOpen(!isDropdownOpen)
@@ -143,19 +143,19 @@ export function DashboardSidebar() {
           >
             <Avatar className="h-8 w-8 flex-shrink-0">
               <AvatarImage src={user?.avatarUrl || ""} alt={user?.name || "User"} />
-              <AvatarFallback className="bg-blue-600 text-white text-sm font-medium">
+              <AvatarFallback className="bg-purple-600 text-white text-sm font-medium">
                 {user?.name?.charAt(0)?.toUpperCase() || user?.email?.charAt(0)?.toUpperCase() || "U"}
               </AvatarFallback>
             </Avatar>
             <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100 overflow-hidden whitespace-nowrap min-w-0 flex-1 text-left">
-              <p className="text-sm font-medium text-gray-900 truncate">
+              <p className="text-sm font-medium text-white truncate">
                 {user?.name || user?.email?.split("@")[0] || "User"}
               </p>
-              <p className="text-xs text-gray-500 truncate">{user?.email}</p>
+              <p className="text-xs text-slate-400 truncate">{user?.email}</p>
             </div>
             <ChevronUp
               className={cn(
-                "h-4 w-4 text-gray-500 transition-transform duration-200 opacity-0 group-hover:opacity-100 flex-shrink-0",
+                "h-4 w-4 text-slate-400 transition-transform duration-200 opacity-0 group-hover:opacity-100 flex-shrink-0",
                 isDropdownOpen ? "rotate-180" : "",
               )}
             />
@@ -163,20 +163,18 @@ export function DashboardSidebar() {
 
           {/* Dropdown Menu - Opens upward with proper z-index */}
           {isDropdownOpen && (
-            <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-gray-200 rounded-md shadow-lg z-[60]">
+            <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-800 border border-slate-700 rounded-xl shadow-xl z-[60]">
               {/* User Info Header */}
-              <div className="px-4 py-3 border-b border-gray-100">
-                <p className="text-sm font-medium text-gray-900">
-                  {user?.name || user?.email?.split("@")[0] || "User"}
-                </p>
-                <p className="text-xs text-gray-500">{user?.email}</p>
+              <div className="px-4 py-3 border-b border-slate-700">
+                <p className="text-sm font-medium text-white">{user?.name || user?.email?.split("@")[0] || "User"}</p>
+                <p className="text-xs text-slate-400">{user?.email}</p>
               </div>
 
               {/* Menu Items */}
               <div className="py-1">
                 <Link
                   href="/dashboard/profile"
-                  className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="flex items-center px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <User className="mr-3 h-4 w-4" />
@@ -184,16 +182,16 @@ export function DashboardSidebar() {
                 </Link>
                 <Link
                   href="/dashboard/settings"
-                  className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="flex items-center px-4 py-2 text-sm text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
                   onClick={() => setIsDropdownOpen(false)}
                 >
                   <Settings className="mr-3 h-4 w-4" />
                   Account Settings
                 </Link>
-                <hr className="my-1 border-gray-100" />
+                <hr className="my-1 border-slate-700" />
                 <button
                   onClick={handleLogout}
-                  className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  className="flex items-center w-full px-4 py-2 text-sm text-red-400 hover:bg-red-900/20 hover:text-red-300 transition-colors"
                 >
                   <LogOut className="mr-3 h-4 w-4" />
                   Log Out

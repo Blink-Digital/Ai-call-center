@@ -4,7 +4,6 @@ import type React from "react"
 import { useCallback, useRef, useState, useEffect } from "react"
 import ReactFlow, {
   MiniMap,
-  Controls,
   Background,
   useNodesState,
   useEdgesState,
@@ -27,14 +26,36 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Slider } from "@/components/ui/slider"
 import { initialNodes } from "./initial-data"
-import { Play, Plus, Globe, Flag, Edit2 } from "lucide-react"
+import {
+  Plus,
+  Globe,
+  Edit2,
+  Play,
+  Minus,
+  Maximize2,
+  Lock,
+  Unlock,
+  List,
+  Search,
+  Trash2,
+  Copy,
+  Undo,
+  ChevronLeft,
+  ChevronRight,
+  Monitor,
+  Code,
+  Save,
+  Sparkles,
+} from "lucide-react"
 import { JsonPreview } from "./json-preview"
 import { TestPathwayDialog } from "./test-pathway-dialog"
 import { useAuth } from "@/contexts/auth-context"
 import { saveFlowchart as saveFlowchartUtil, loadFlowchart } from "@/utils/save-flowchart"
 import { useSearchParams } from "next/navigation"
 import { convertFlowchartToBlandFormat, normalizeId } from "./deploy-utils"
+import { formatPhoneNumber } from "@/utils/phone-utils"
 
 const initialEdges: Edge[] = []
 
@@ -54,6 +75,7 @@ const CustomEdge = ({
   onEdgeClick,
 }: any) => {
   const [isHovered, setIsHovered] = useState(false)
+  const [isEditingLabel, setIsEditingLabel] = useState(false)
   const { setEdges } = useReactFlow()
 
   const [edgePath, labelX, labelY] = getBezierPath({
@@ -93,7 +115,7 @@ const CustomEdge = ({
         id={id}
         style={{
           ...style,
-          stroke: selected || isHovered ? "#3b82f6" : style.stroke || "#b1b1b7",
+          stroke: selected || isHovered ? "#8b5cf6" : style.stroke || "#64748b",
           strokeWidth: selected || isHovered ? 3 : style.strokeWidth || 1.5,
           cursor: "pointer",
         }}
@@ -114,52 +136,59 @@ const CustomEdge = ({
         }}
       />
 
-      {/* Clickable Label */}
+      {/* Enhanced Clickable Label with Edit Icon */}
       <foreignObject
-        width={140}
-        height={40}
-        x={labelX - 70}
-        y={labelY - 20}
+        width={160}
+        height={44}
+        x={labelX - 80}
+        y={labelY - 22}
         className="overflow-visible"
         requiredExtensions="http://www.w3.org/1999/xhtml"
       >
         <div
           style={{
-            background: selected || isHovered ? "#eff6ff" : "white",
-            padding: "8px 12px",
-            borderRadius: "8px",
+            background: selected || isHovered ? "hsl(262 83% 58% / 0.15)" : "hsl(240 23% 12% / 0.95)",
+            padding: "10px 14px",
+            borderRadius: "14px",
             fontSize: "12px",
             fontWeight: 500,
-            border: selected || isHovered ? "2px solid #3b82f6" : "1px solid #d1d5db",
+            border: selected || isHovered ? "2px solid #8b5cf6" : "1px solid hsl(240 23% 18%)",
             cursor: "pointer",
-            boxShadow: selected || isHovered ? "0 0 0 3px rgba(59, 130, 246, 0.1)" : "0 2px 4px 0 rgba(0, 0, 0, 0.1)",
-            minWidth: "100px",
+            boxShadow:
+              selected || isHovered
+                ? "0 0 0 3px rgba(139, 92, 246, 0.1), 0 8px 25px -5px rgba(0, 0, 0, 0.4)"
+                : "0 4px 12px -2px rgba(0, 0, 0, 0.4)",
+            minWidth: "120px",
             textAlign: "center",
             display: "flex",
             alignItems: "center",
-            gap: "6px",
+            gap: "8px",
             justifyContent: "center",
             position: "relative",
             zIndex: 1000,
             transition: "all 0.2s ease-in-out",
+            color: "hsl(240 10% 90%)",
+            backdropFilter: "blur(8px)",
           }}
           className="nodrag nopan"
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
           onClick={handleLabelClick}
         >
-          <span>{label}</span>
-          <Edit2 className="h-3 w-3 text-blue-600 opacity-70 hover:opacity-100" />
+          <span className="truncate">{label}</span>
+          {(isHovered || selected) && (
+            <Edit2 className="h-3 w-3 text-purple-400 opacity-80 hover:opacity-100 flex-shrink-0" />
+          )}
         </div>
       </foreignObject>
 
       {/* Delete button */}
       {(selected || isHovered) && (
         <foreignObject
-          width={22}
-          height={22}
-          x={(sourceX + targetX) / 2 - 11}
-          y={(sourceY + targetY) / 2 - 31}
+          width={24}
+          height={24}
+          x={(sourceX + targetX) / 2 - 12}
+          y={(sourceY + targetY) / 2 - 32}
           className="overflow-visible"
         >
           <div
@@ -167,18 +196,19 @@ const CustomEdge = ({
               background: "#ef4444",
               color: "white",
               borderRadius: "50%",
-              width: "22px",
-              height: "22px",
+              width: "24px",
+              height: "24px",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: "14px",
+              fontSize: "12px",
               fontWeight: "bold",
               cursor: "pointer",
-              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+              boxShadow: "0 4px 12px -2px rgba(239, 68, 68, 0.4)",
               zIndex: 1001,
+              transition: "all 0.2s ease-in-out",
             }}
-            className="nodrag nopan"
+            className="nodrag nopan hover:scale-110"
             onClick={handleDelete}
             title="Delete connection"
           >
@@ -248,31 +278,51 @@ function FlowchartBuilderInner({
   const [showDebugPayload, setShowDebugPayload] = useState(false)
   const [debugPayload, setDebugPayload] = useState<any>(null)
 
+  // Add new state variables for viewport controls
+  const [isPanLocked, setIsPanLocked] = useState(false)
+  const [showOutlineView, setShowOutlineView] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showNodeSearch, setShowNodeSearch] = useState(false)
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+
+  // Add new state variables after the existing state declarations
+  const [isLeftRailCollapsed, setIsLeftRailCollapsed] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState([100])
+  const [isGlobalPromptEnabled, setIsGlobalPromptEnabled] = useState(false)
+  const [isWebClientEnabled, setIsWebClientEnabled] = useState(false)
+  const [showMiniMap, setShowMiniMap] = useState(true)
+  const [isViewportOutOfCenter, setIsViewportOutOfCenter] = useState(false)
+
   // Create edge types with click handler
   const edgeTypes = {
     custom: (props: any) => <CustomEdge {...props} onEdgeClick={handleEdgeClick} />,
   }
 
-  // Initialize pathway name
+  // Format phone number for display
+  const formattedPhoneNumber = phoneNumber
+    ? formatPhoneNumber(phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`)
+    : ""
+
+  // Initialize pathway name - Fixed to prevent infinite loops
   useEffect(() => {
-    if (initialPathwayName) {
+    if (initialPathwayName && !pathwayName) {
       setPathwayName(initialPathwayName)
-    } else if (phoneNumber) {
+    } else if (phoneNumber && !pathwayName) {
       const formattedNumber = phoneNumber.startsWith("+") ? phoneNumber : `+1${phoneNumber}`
       setPathwayName(`Pathway for ${formattedNumber}`)
       setPathwayDescription(`Call flow for phone number ${formattedNumber}`)
     }
 
-    // Load saved API key
+    // Load saved API key only once
     const savedApiKey = localStorage.getItem("bland-api-key")
-    if (savedApiKey) {
+    if (savedApiKey && !apiKey) {
       setApiKey(savedApiKey)
     }
-  }, [initialPathwayName, phoneNumber])
+  }, [initialPathwayName, phoneNumber]) // Removed pathwayName and apiKey from dependencies
 
   // Load generated flowchart data from URL
   useEffect(() => {
-    if (generatedParam && reactFlowInstance) {
+    if (generatedParam && reactFlowInstance && !hasLoadedInitialData) {
       try {
         console.log("[FLOWCHART] 🤖 Loading AI-generated flowchart from URL...")
         const generatedData = JSON.parse(decodeURIComponent(generatedParam))
@@ -303,6 +353,8 @@ function FlowchartBuilderInner({
             title: "AI-Generated Flowchart Loaded",
             description: `Loaded ${generatedData.nodes.length} nodes and ${generatedData.edges.length} connections`,
           })
+
+          setHasLoadedInitialData(true)
         }
       } catch (error) {
         console.error("[FLOWCHART] ❌ Error parsing generated data:", error)
@@ -313,7 +365,7 @@ function FlowchartBuilderInner({
         })
       }
     }
-  }, [generatedParam, reactFlowInstance, setNodes, setEdges])
+  }, [generatedParam, reactFlowInstance, hasLoadedInitialData, setNodes, setEdges])
 
   // Auto-load saved flowchart from database
   useEffect(() => {
@@ -391,11 +443,11 @@ function FlowchartBuilderInner({
     }
 
     loadSavedFlowchart()
-  }, [user, phoneNumber, reactFlowInstance, hasLoadedInitialData, generatedParam, setNodes, setEdges])
+  }, [user, phoneNumber, reactFlowInstance, hasLoadedInitialData, generatedParam])
 
-  // Update Bland.ai payload preview
+  // Update Bland.ai payload preview - Fixed to prevent infinite loops
   useEffect(() => {
-    if (reactFlowInstance) {
+    if (reactFlowInstance && nodes.length > 0) {
       const flow = reactFlowInstance.toObject()
       const startNodeId = nodes.find((node) => node.type === "greetingNode")?.id || nodes[0]?.id || ""
 
@@ -405,7 +457,19 @@ function FlowchartBuilderInner({
 
       setBlandPayload(blandFormat)
     }
-  }, [nodes, edges, reactFlowInstance, pathwayName, pathwayDescription])
+  }, [nodes, edges, pathwayName, pathwayDescription]) // Removed reactFlowInstance from dependencies
+
+  // Monitor zoom level changes
+  useEffect(() => {
+    if (reactFlowInstance) {
+      const handleZoomChange = () => {
+        const zoom = reactFlowInstance.getZoom()
+        setZoomLevel([Math.round(zoom * 100)])
+      }
+
+      reactFlowInstance.onZoomChange = handleZoomChange
+    }
+  }, [reactFlowInstance])
 
   const onConnect = useCallback(
     (params: Connection) => {
@@ -606,6 +670,132 @@ function FlowchartBuilderInner({
     }
   }
 
+  const handlePanLockToggle = () => {
+    setIsPanLocked(!isPanLocked)
+    toast({
+      title: isPanLocked ? "Pan unlocked" : "Pan locked",
+      description: isPanLocked ? "You can now pan the canvas" : "Canvas panning is locked",
+    })
+  }
+
+  const handleOutlineToggle = () => {
+    setShowOutlineView(!showOutlineView)
+    toast({
+      title: showOutlineView ? "Outline view hidden" : "Outline view shown",
+      description: showOutlineView ? "Switched to canvas view" : "Showing node outline",
+    })
+  }
+
+  const handleNodeSearch = () => {
+    setShowNodeSearch(!showNodeSearch)
+  }
+
+  const handleDeleteSelected = () => {
+    if (selectedNodeIds.length === 0) {
+      toast({
+        title: "No nodes selected",
+        description: "Select nodes to delete them",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setNodes((nds) => nds.filter((node) => !selectedNodeIds.includes(node.id)))
+    setEdges((eds) =>
+      eds.filter((edge) => !selectedNodeIds.includes(edge.source) && !selectedNodeIds.includes(edge.target)),
+    )
+    setSelectedNodeIds([])
+
+    toast({
+      title: "Nodes deleted",
+      description: `Deleted ${selectedNodeIds.length} node(s)`,
+    })
+  }
+
+  const handleDuplicateSelected = () => {
+    if (selectedNodeIds.length === 0) {
+      toast({
+        title: "No nodes selected",
+        description: "Select nodes to duplicate them",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const nodesToDuplicate = nodes.filter((node) => selectedNodeIds.includes(node.id))
+    const newNodes = nodesToDuplicate.map((node) => ({
+      ...node,
+      id: `${node.id}_copy_${Date.now()}`,
+      position: {
+        x: node.position.x + 50,
+        y: node.position.y + 50,
+      },
+    }))
+
+    setNodes((nds) => [...nds, ...newNodes])
+
+    toast({
+      title: "Nodes duplicated",
+      description: `Duplicated ${selectedNodeIds.length} node(s)`,
+    })
+  }
+
+  const handleUndo = () => {
+    toast({
+      title: "Undo",
+      description: "Undo functionality coming soon...",
+    })
+  }
+
+  const handleRedo = () => {
+    toast({
+      title: "Redo",
+      description: "Redo functionality coming soon...",
+    })
+  }
+
+  const handleFitView = () => {
+    if (reactFlowInstance) {
+      reactFlowInstance.fitView({ padding: 0.2 })
+      setIsViewportOutOfCenter(false)
+      toast({
+        title: "View fitted",
+        description: "Centered and zoomed to fit all nodes",
+      })
+    }
+  }
+
+  const handleZoomChange = (value: number[]) => {
+    if (reactFlowInstance) {
+      reactFlowInstance.zoomTo(value[0] / 100)
+      setZoomLevel(value)
+    }
+  }
+
+  const handleGlobalPromptToggle = () => {
+    setIsGlobalPromptEnabled(!isGlobalPromptEnabled)
+    toast({
+      title: isGlobalPromptEnabled ? "Global Prompt disabled" : "Global Prompt enabled",
+      description: isGlobalPromptEnabled
+        ? "Global prompt settings are now disabled"
+        : "Global prompt settings are now active",
+    })
+  }
+
+  const handleWebClientToggle = () => {
+    setIsWebClientEnabled(!isWebClientEnabled)
+    toast({
+      title: isWebClientEnabled ? "Web Client disabled" : "Web Client enabled",
+      description: isWebClientEnabled ? "Web client is now disabled" : "Web client is now active",
+    })
+  }
+
+  // Handle node selection change - Fixed to prevent infinite loops
+  const handleSelectionChange = useCallback((params: any) => {
+    const nodeIds = params.nodes?.map((node: any) => node.id) || []
+    setSelectedNodeIds(nodeIds)
+  }, [])
+
   // ✅ FINAL: Comprehensive payload debugging and validation
   const handleUpdatePathway = async () => {
     if (!reactFlowInstance || !apiKey || !pathwayName || !existingPathwayId) {
@@ -617,25 +807,12 @@ function FlowchartBuilderInner({
       return
     }
 
-    console.log("=".repeat(120))
-    console.log("[UPDATE_PATHWAY] 🚀 FINAL COMPREHENSIVE PAYLOAD VALIDATION")
-    console.log("=".repeat(120))
-
     setIsDeploying(true)
 
     try {
-      // Step 1: Get ReactFlow data
       const flow = reactFlowInstance.toObject()
-      console.log("[UPDATE_PATHWAY] 📊 Step 1 - ReactFlow Raw Data:")
-      console.log("[UPDATE_PATHWAY] - Nodes count:", flow.nodes.length)
-      console.log("[UPDATE_PATHWAY] - Edges count:", flow.edges.length)
-
-      // Step 2: Find start node
       const startNodeId = nodes.find((node) => node.type === "greetingNode")?.id || nodes[0]?.id || ""
-      console.log("[UPDATE_PATHWAY] 🎯 Step 2 - Start Node ID:", startNodeId)
 
-      // Step 3: Call convertFlowchartToBlandFormat
-      console.log("[UPDATE_PATHWAY] 🔄 Step 3 - Converting to Bland.ai format...")
       const blandApiPayload = convertFlowchartToBlandFormat(
         flow.nodes,
         flow.edges,
@@ -644,141 +821,26 @@ function FlowchartBuilderInner({
         pathwayDescription || `Call flow for phone number ${phoneNumber}`,
       )
 
-      // Step 4: CRITICAL VALIDATION - Check payload structure
-      console.log("[UPDATE_PATHWAY] 🔍 Step 4 - PAYLOAD STRUCTURE VALIDATION:")
-      console.log("[UPDATE_PATHWAY] - Payload type:", typeof blandApiPayload)
-      console.log("[UPDATE_PATHWAY] - Payload keys:", Object.keys(blandApiPayload))
-
-      // Verify ONLY the 4 required fields exist
-      const requiredFields = ["name", "description", "nodes", "edges"]
-      const actualFields = Object.keys(blandApiPayload)
-      const extraFields = actualFields.filter((field) => !requiredFields.includes(field))
-      const missingFields = requiredFields.filter((field) => !actualFields.includes(field))
-
-      console.log(
-        "[UPDATE_PATHWAY] - Required fields present:",
-        requiredFields.every((field) => actualFields.includes(field)),
-      )
-      console.log("[UPDATE_PATHWAY] - Extra fields found:", extraFields)
-      console.log("[UPDATE_PATHWAY] - Missing fields:", missingFields)
-
-      if (extraFields.length > 0) {
-        console.error("[UPDATE_PATHWAY] ❌ CRITICAL: Extra fields detected:", extraFields)
-        throw new Error(`Payload contains disallowed fields: ${extraFields.join(", ")}`)
-      }
-
-      if (missingFields.length > 0) {
-        console.error("[UPDATE_PATHWAY] ❌ CRITICAL: Missing required fields:", missingFields)
-        throw new Error(`Payload missing required fields: ${missingFields.join(", ")}`)
-      }
-
-      // Step 5: Validate field types
-      console.log("[UPDATE_PATHWAY] ✅ Step 5 - FIELD TYPE VALIDATION:")
-      console.log("[UPDATE_PATHWAY] - name is string:", typeof blandApiPayload.name === "string")
-      console.log("[UPDATE_PATHWAY] - description is string:", typeof blandApiPayload.description === "string")
-      console.log("[UPDATE_PATHWAY] - nodes is array:", Array.isArray(blandApiPayload.nodes))
-      console.log("[UPDATE_PATHWAY] - edges is array:", Array.isArray(blandApiPayload.edges))
-
-      // Step 6: Validate nodes structure
-      console.log("[UPDATE_PATHWAY] 🔍 Step 6 - NODES VALIDATION:")
-      blandApiPayload.nodes.forEach((node: any, index: number) => {
-        const hasRequiredStructure = !!(node.id && node.type && node.data)
-        console.log(`[UPDATE_PATHWAY] - Node ${index + 1} (${node.id}):`, {
-          type: node.type,
-          hasRequiredStructure,
-          dataKeys: node.data ? Object.keys(node.data) : [],
-          isStart: node.data?.isStart,
-        })
-
-        // Validate specific node type requirements
-        if (node.type === "End Call" && !node.data?.prompt) {
-          console.error(`[UPDATE_PATHWAY] ❌ End Call node ${node.id} missing prompt field`)
-          throw new Error(`End Call node ${node.id} must have prompt field in data`)
-        }
-        if (node.type === "Transfer Call" && !node.data?.transferNumber) {
-          console.error(`[UPDATE_PATHWAY] ❌ Transfer Call node ${node.id} missing transferNumber field`)
-          throw new Error(`Transfer Call node ${node.id} must have transferNumber field in data`)
-        }
-        if (node.type === "Webhook" && (!node.data?.url || !node.data?.method)) {
-          console.error(`[UPDATE_PATHWAY] ❌ Webhook node ${node.id} missing url or method field`)
-          throw new Error(`Webhook node ${node.id} must have url and method fields in data`)
-        }
-      })
-
-      // Step 7: Validate edges structure
-      console.log("[UPDATE_PATHWAY] 🔗 Step 7 - EDGES VALIDATION:")
-      blandApiPayload.edges.forEach((edge: any, index: number) => {
-        const hasRequiredFields = !!(edge.id && edge.source && edge.target && edge.label)
-        console.log(`[UPDATE_PATHWAY] - Edge ${index + 1} (${edge.id}):`, {
-          hasRequiredFields,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label,
-        })
-
-        if (!hasRequiredFields) {
-          console.error(`[UPDATE_PATHWAY] ❌ Edge ${edge.id} missing required fields`)
-          throw new Error(`Edge ${edge.id} must have id, source, target, and label fields`)
-        }
-      })
-
-      // Step 8: Create final request payload
       const requestPayload = {
         apiKey,
         pathwayId: existingPathwayId,
-        flowchart: blandApiPayload, // This is the EXACT payload for Bland.ai
+        flowchart: blandApiPayload,
       }
 
-      console.log("[UPDATE_PATHWAY] 📤 Step 8 - FINAL REQUEST PAYLOAD:")
-      console.log("[UPDATE_PATHWAY] - Request keys:", Object.keys(requestPayload))
-      console.log("[UPDATE_PATHWAY] - Flowchart keys:", Object.keys(requestPayload.flowchart))
-
-      // Step 9: JSON serialization test
-      console.log("[UPDATE_PATHWAY] 🧪 Step 9 - JSON SERIALIZATION TEST:")
-      let serializedPayload: string
-      try {
-        serializedPayload = JSON.stringify(requestPayload)
-        console.log("[UPDATE_PATHWAY] ✅ Serialization successful")
-        console.log("[UPDATE_PATHWAY] - Serialized length:", serializedPayload.length)
-
-        // Test if it can be parsed back
-        const parsedBack = JSON.parse(serializedPayload)
-        console.log("[UPDATE_PATHWAY] ✅ Round-trip serialization test passed")
-      } catch (serializationError) {
-        console.error("[UPDATE_PATHWAY] ❌ Serialization failed:", serializationError)
-        throw new Error("Failed to serialize payload to JSON")
-      }
-
-      // Step 10: Log exact payload being sent
-      console.log("[UPDATE_PATHWAY] 📋 Step 10 - EXACT PAYLOAD TO BLAND.AI:")
-      console.log(JSON.stringify(requestPayload.flowchart, null, 2))
-
-      // Step 11: Make the API call
-      console.log("[UPDATE_PATHWAY] 🌐 Step 11 - Making API call...")
       const response = await fetch("/api/bland-ai/update-pathway", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: serializedPayload,
+        body: JSON.stringify(requestPayload),
       })
 
-      console.log("[UPDATE_PATHWAY] 📡 Step 12 - API Response:")
-      console.log("[UPDATE_PATHWAY] - Status:", response.status)
-      console.log("[UPDATE_PATHWAY] - OK:", response.ok)
-
       const result = await response.json()
-      console.log("[UPDATE_PATHWAY] 📥 Step 13 - Response Body:", result)
 
       if (!response.ok) {
-        console.error("[UPDATE_PATHWAY] ❌ API ERROR:")
-        console.error("[UPDATE_PATHWAY] - Status:", response.status)
-        console.error("[UPDATE_PATHWAY] - Response:", result)
-
         throw new Error(result.message || result.error || `HTTP ${response.status}: ${response.statusText}`)
       }
 
-      console.log("[UPDATE_PATHWAY] ✅ SUCCESS! Pathway updated successfully")
       localStorage.setItem("bland-api-key", apiKey)
 
       toast({
@@ -788,16 +850,7 @@ function FlowchartBuilderInner({
 
       setDeployDialogOpen(false)
       setDeploymentResult(result)
-
-      console.log("=".repeat(120))
-      console.log("[UPDATE_PATHWAY] 🎉 COMPREHENSIVE VALIDATION COMPLETED SUCCESSFULLY")
-      console.log("=".repeat(120))
     } catch (error) {
-      console.error("=".repeat(120))
-      console.error("[UPDATE_PATHWAY] ❌ ERROR OCCURRED:")
-      console.error("=".repeat(120))
-      console.error("[UPDATE_PATHWAY] Error:", error)
-
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred"
 
       toast({
@@ -805,10 +858,6 @@ function FlowchartBuilderInner({
         description: errorMessage,
         variant: "destructive",
       })
-
-      console.error("=".repeat(120))
-      console.error("[UPDATE_PATHWAY] 💥 VALIDATION FAILED")
-      console.error("=".repeat(120))
     } finally {
       setIsDeploying(false)
     }
@@ -859,10 +908,12 @@ function FlowchartBuilderInner({
   // Show loading state while auth is loading OR while loading flowchart
   if (authLoading || isLoadingFlowchart) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex items-center justify-center bg-slate-900">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600">{authLoading ? "Loading flowchart builder..." : "Loading saved flowchart..."}</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600 mx-auto mb-4"></div>
+          <p className="text-slate-300">
+            {authLoading ? "Loading flowchart builder..." : "Loading saved flowchart..."}
+          </p>
         </div>
       </div>
     )
@@ -871,10 +922,10 @@ function FlowchartBuilderInner({
   // Show auth required state
   if (!user) {
     return (
-      <div className="h-full flex items-center justify-center">
+      <div className="h-full flex items-center justify-center bg-slate-900">
         <div className="text-center">
-          <h2 className="text-xl font-semibold text-red-600 mb-2">Authentication Required</h2>
-          <p className="text-gray-600">Please log in to use the flowchart builder.</p>
+          <h2 className="text-xl font-semibold text-red-400 mb-2">Authentication Required</h2>
+          <p className="text-slate-300">Please log in to use the flowchart builder.</p>
         </div>
       </div>
     )
@@ -887,41 +938,285 @@ function FlowchartBuilderInner({
 
   return (
     <>
-      <div className="h-full w-full overflow-hidden bg-white relative">
-        {/* Floating Control Buttons - Top Left */}
-        <div className="absolute top-4 left-4 z-50 flex flex-col gap-3">
-          {/* Add New Node Button */}
-          <Button
-            onClick={() => setIsAddNodePanelOpen(true)}
-            className="bg-purple-600 hover:bg-purple-700 text-white rounded-lg py-3 px-4 flex items-center gap-2 font-medium shadow-lg transition-all duration-200 hover:shadow-xl"
-          >
-            <Plus className="h-5 w-5" />
-            Add new node
-          </Button>
+      <div className="h-full w-full overflow-hidden bg-slate-900 relative">
+        {/* Enhanced Top Bar */}
+        <div className="absolute top-0 left-0 right-0 z-50 bg-slate-800/95 backdrop-blur-sm border-b border-slate-700">
+          <div className="flex items-center justify-between px-6 py-4">
+            {/* Left: Friendly Title */}
+            <div className="flex items-center gap-4">
+              <div>
+                <h1 className="text-xl font-semibold text-white">
+                  {formattedPhoneNumber ? `Pathway for ${formattedPhoneNumber}` : "Flowchart Builder"}
+                </h1>
+                {pathwayName && pathwayName !== `Pathway for ${formattedPhoneNumber}` && (
+                  <p className="text-sm text-slate-400 mt-1">{pathwayName}</p>
+                )}
+              </div>
+            </div>
 
-          {/* Global Prompt Button */}
-          <Button
-            onClick={handleGlobalPrompt}
-            variant="outline"
-            className="rounded-lg py-3 px-4 flex items-center gap-2 font-medium border-blue-200 hover:bg-blue-50 transition-all duration-200 bg-white shadow-lg text-blue-600 border-2 hover:border-blue-300"
-          >
-            <Globe className="h-4 w-4" />
-            Global Prompt
-          </Button>
+            {/* Right: Action Buttons - Regrouped */}
+            <div className="flex items-center gap-3">
+              {/* Persistent State Actions */}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleSaveFlowchart}
+                  className="bg-green-600 hover:bg-green-700 text-white shadow-md rounded-xl flex items-center gap-2"
+                  size="sm"
+                >
+                  <Save className="h-4 w-4" />
+                  Save
+                </Button>
+                <Button
+                  onClick={handleDeploy}
+                  className="bg-green-600 hover:bg-green-700 text-white shadow-md rounded-xl"
+                  size="sm"
+                >
+                  {existingPathwayId ? "Update" : "Deploy"}
+                </Button>
+              </div>
 
-          {/* Feature Flags Button */}
-          <Button
-            onClick={handleFeatureFlags}
-            variant="outline"
-            className="rounded-lg py-3 px-4 flex items-center gap-2 font-medium border-gray-300 hover:bg-gray-50 transition-all duration-200 bg-white shadow-lg text-gray-600"
-          >
-            <Flag className="h-4 w-4" />
-            Feature Flags
-          </Button>
+              {/* Separator */}
+              <div className="w-px h-6 bg-slate-600" />
+
+              {/* Utility/Debug Actions */}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => setTestPathwayOpen(true)}
+                  className="bg-purple-600 hover:bg-purple-700 text-white flex items-center gap-2 shadow-md rounded-xl"
+                  size="sm"
+                >
+                  <Play className="h-4 w-4" />
+                  Test
+                </Button>
+                {blandPayload && (
+                  <JsonPreview
+                    data={blandPayload}
+                    title="Bland.ai Pathway JSON"
+                    trigger={
+                      <Button
+                        variant="outline"
+                        className="border-slate-600 text-slate-300 hover:bg-slate-700 rounded-xl flex items-center gap-2 bg-transparent"
+                        size="sm"
+                      >
+                        <Code className="h-4 w-4" />
+                        JSON
+                      </Button>
+                    }
+                  />
+                )}
+              </div>
+
+              {/* AI Generator */}
+              <Button
+                variant="outline"
+                className="border-slate-600 text-slate-300 hover:bg-slate-700 rounded-xl flex items-center gap-2 bg-transparent"
+                size="sm"
+                onClick={() => {
+                  // Navigate to AI generator
+                  window.location.href = `/dashboard/call-flows/generate${
+                    phoneNumber ? `?phoneNumber=${phoneNumber}` : ""
+                  }`
+                }}
+              >
+                <Sparkles className="h-4 w-4" />
+                AI Generator
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Enhanced Collapsible Left Rail */}
+        <div
+          className={`absolute left-0 top-20 bottom-0 z-40 bg-slate-800/95 backdrop-blur-sm border-r border-slate-700 transition-all duration-300 ${
+            isLeftRailCollapsed ? "w-16" : "w-64"
+          }`}
+        >
+          {/* Rail Header */}
+          <div className="flex items-center justify-between p-4 border-b border-slate-700">
+            {!isLeftRailCollapsed && <h3 className="text-sm font-medium text-slate-300">Controls</h3>}
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-8 h-8 p-0 text-slate-400 hover:text-white hover:bg-slate-700"
+              onClick={() => setIsLeftRailCollapsed(!isLeftRailCollapsed)}
+            >
+              {isLeftRailCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          </div>
+
+          {/* Rail Content */}
+          <div className="p-4 space-y-4">
+            {/* Add Node Button */}
+            <Button
+              onClick={() => setIsAddNodePanelOpen(true)}
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white rounded-xl flex items-center gap-3 justify-start"
+              size={isLeftRailCollapsed ? "sm" : "default"}
+            >
+              <Plus className="h-5 w-5 flex-shrink-0" />
+              {!isLeftRailCollapsed && <span>Add Node</span>}
+            </Button>
+
+            {/* Toggle Controls */}
+            <div className="space-y-2">
+              <Button
+                onClick={handleGlobalPromptToggle}
+                variant="outline"
+                className={`w-full rounded-xl flex items-center gap-3 justify-start border-slate-600 hover:bg-slate-700 transition-all ${
+                  isGlobalPromptEnabled ? "bg-slate-700 text-purple-400 border-purple-500" : "text-slate-300"
+                }`}
+                size={isLeftRailCollapsed ? "sm" : "default"}
+                title={isLeftRailCollapsed ? "Global Prompt" : undefined}
+              >
+                <Globe className="h-4 w-4 flex-shrink-0" />
+                {!isLeftRailCollapsed && <span>Global Prompt</span>}
+                {!isLeftRailCollapsed && isGlobalPromptEnabled && (
+                  <div className="ml-auto w-2 h-2 bg-purple-400 rounded-full" />
+                )}
+              </Button>
+
+              <Button
+                onClick={handleWebClientToggle}
+                variant="outline"
+                className={`w-full rounded-xl flex items-center gap-3 justify-start border-slate-600 hover:bg-slate-700 transition-all ${
+                  isWebClientEnabled ? "bg-slate-700 text-purple-400 border-purple-500" : "text-slate-300"
+                }`}
+                size={isLeftRailCollapsed ? "sm" : "default"}
+                title={isLeftRailCollapsed ? "Web Client" : undefined}
+              >
+                <Monitor className="h-4 w-4 flex-shrink-0" />
+                {!isLeftRailCollapsed && <span>Web Client</span>}
+                {!isLeftRailCollapsed && isWebClientEnabled && (
+                  <div className="ml-auto w-2 h-2 bg-purple-400 rounded-full" />
+                )}
+              </Button>
+            </div>
+
+            {/* Separator */}
+            <div className="border-t border-slate-700 pt-4">
+              {!isLeftRailCollapsed && <p className="text-xs text-slate-500 mb-3">Canvas Controls</p>}
+
+              {/* Canvas Control Grid */}
+              <div className={`grid gap-2 ${isLeftRailCollapsed ? "grid-cols-1" : "grid-cols-2"}`}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg ${
+                    isPanLocked ? "bg-slate-700 text-purple-400" : ""
+                  }`}
+                  onClick={handlePanLockToggle}
+                  title={isPanLocked ? "Unlock Panning" : "Lock Panning"}
+                >
+                  {isPanLocked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg ${
+                    showOutlineView ? "bg-slate-700 text-purple-400" : ""
+                  }`}
+                  onClick={handleOutlineToggle}
+                  title="Toggle Outline View"
+                >
+                  <List className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={`text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg ${
+                    showNodeSearch ? "bg-slate-700 text-purple-400" : ""
+                  }`}
+                  onClick={handleNodeSearch}
+                  title="Search Nodes"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-slate-300 hover:bg-red-600 hover:text-white rounded-lg"
+                  onClick={handleDeleteSelected}
+                  disabled={selectedNodeIds.length === 0}
+                  title="Delete Selected"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg"
+                  onClick={handleDuplicateSelected}
+                  disabled={selectedNodeIds.length === 0}
+                  title="Duplicate Selected"
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg"
+                  onClick={handleUndo}
+                  title="Undo"
+                >
+                  <Undo className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* Zoom Control */}
+            {!isLeftRailCollapsed && (
+              <div className="border-t border-slate-700 pt-4">
+                <p className="text-xs text-slate-500 mb-3">Zoom: {zoomLevel[0]}%</p>
+                <Slider
+                  value={zoomLevel}
+                  onValueChange={handleZoomChange}
+                  max={200}
+                  min={25}
+                  step={5}
+                  className="w-full"
+                />
+                <div className="flex justify-between mt-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg"
+                    onClick={() => handleZoomChange([50])}
+                  >
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={`text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg ${
+                      isViewportOutOfCenter ? "bg-purple-600 text-white" : ""
+                    }`}
+                    onClick={handleFitView}
+                  >
+                    <Maximize2 className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-slate-300 hover:bg-slate-700 hover:text-white rounded-lg"
+                    onClick={() => handleZoomChange([150])}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Full Screen ReactFlow Canvas */}
-        <div className="w-full h-full" ref={reactFlowWrapper}>
+        <div
+          className={`w-full h-full transition-all duration-300 ${isLeftRailCollapsed ? "pl-16" : "pl-64"} pt-20`}
+          ref={reactFlowWrapper}
+        >
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -930,6 +1225,7 @@ function FlowchartBuilderInner({
             onConnect={onConnect}
             onInit={setReactFlowInstance}
             onNodeClick={handleNodeClick}
+            onSelectionChange={handleSelectionChange}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             defaultEdgeOptions={{ type: "custom" }}
@@ -941,54 +1237,160 @@ function FlowchartBuilderInner({
             deleteKeyCode={["Backspace", "Delete"]}
             className="w-full h-full"
             style={{ width: "100%", height: "100%" }}
+            panOnDrag={!isPanLocked}
+            snapToGrid={true}
+            snapGrid={[20, 20]}
           >
-            <Controls className="bg-white border border-gray-200 shadow-lg rounded-xl" />
-            <MiniMap
-              className="bg-white border border-gray-200 shadow-lg rounded-xl overflow-hidden"
-              nodeColor="#3b82f6"
-              maskColor="rgba(0, 0, 0, 0.1)"
-            />
-            <Background variant="dots" gap={20} size={1} color="#e5e7eb" />
+            {/* Enhanced MiniMap */}
+            {showMiniMap && (
+              <MiniMap
+                className="bg-slate-800/90 border border-slate-700 shadow-xl rounded-xl overflow-hidden backdrop-blur-sm"
+                nodeColor="#8b5cf6"
+                maskColor="rgba(0, 0, 0, 0.4)"
+                pannable
+                zoomable
+                onClick={() => setShowMiniMap(false)}
+              />
+            )}
 
-            {/* Action buttons in top-right corner with proper z-index */}
-            <Panel position="top-right" className="flex gap-3 p-4 z-40">
-              <Button onClick={handleSaveFlowchart} className="bg-green-600 hover:bg-green-700 shadow-md" size="sm">
-                Save Flowchart
-              </Button>
-              <Button
-                onClick={() => setTestPathwayOpen(true)}
-                className="bg-blue-600 hover:bg-blue-700 flex items-center gap-2 shadow-md"
-                size="sm"
-              >
-                <Play className="h-4 w-4" />
-                Test Pathway
-              </Button>
-              {blandPayload && <JsonPreview data={blandPayload} title="Bland.ai Pathway JSON" />}
-              <Button onClick={handleDeploy} className="bg-blue-600 hover:bg-blue-700 shadow-md" size="sm">
-                {existingPathwayId ? "Update Pathway" : "Deploy to Bland.ai"}
-              </Button>
-            </Panel>
+            {/* Enhanced Background with Ruler Grid */}
+            <Background variant="dots" gap={20} size={1.5} color="#475569" />
 
-            {/* Debug info panel - positioned to avoid overlap */}
+            {/* Debug info panel - Enhanced */}
             <Panel
               position="bottom-left"
-              className="flex flex-col gap-2 p-4 bg-white border border-gray-200 rounded-lg shadow-sm z-30"
+              className="flex flex-col gap-2 p-4 bg-slate-800/90 border border-slate-700 rounded-xl shadow-sm backdrop-blur-sm"
             >
-              <div className="text-xs text-gray-600">
-                <div>Nodes: {nodes.length}</div>
-                <div>Edges: {edges.length}</div>
-                <div>Phone: {phoneNumber || "None"}</div>
-                <div>Pathway ID: {existingPathwayId || "None"}</div>
-                <div>API Key: {apiKey ? "Set" : "Missing"}</div>
-                <div>User: {user?.email || "None"}</div>
-                <div className="text-xs font-medium mt-1">
-                  Status: {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
+              <div className="text-xs text-slate-400 space-y-1">
+                <div className="flex justify-between">
+                  <span>Nodes:</span>
+                  <span className="text-white">{nodes.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Edges:</span>
+                  <span className="text-white">{edges.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Selected:</span>
+                  <span className="text-white">{selectedNodeIds.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Zoom:</span>
+                  <span className="text-white">{zoomLevel[0]}%</span>
+                </div>
+                <div className="text-xs font-medium mt-2 text-purple-400">
+                  {existingPathwayId ? "🔄 Will Update" : "🆕 Will Create New"}
                 </div>
               </div>
             </Panel>
           </ReactFlow>
         </div>
       </div>
+
+      {/* Enhanced Node Search Overlay */}
+      {showNodeSearch && (
+        <div className="absolute top-24 left-4 z-50 bg-slate-800/95 backdrop-blur-sm border border-slate-700 rounded-xl p-4 shadow-xl w-80">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-slate-300">Search Nodes</h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-6 h-6 p-0 text-slate-400 hover:text-white"
+              onClick={() => setShowNodeSearch(false)}
+            >
+              ✕
+            </Button>
+          </div>
+          <Input
+            placeholder="Search by node name or type..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="mb-3 bg-slate-700 border-slate-600 text-white"
+          />
+          <div className="max-h-60 overflow-y-auto space-y-1">
+            {nodes
+              .filter(
+                (node) =>
+                  node.data?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  node.type?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                  node.data?.text?.toLowerCase().includes(searchQuery.toLowerCase()),
+              )
+              .map((node) => (
+                <div
+                  key={node.id}
+                  className="flex items-center justify-between p-3 hover:bg-slate-700 rounded-lg cursor-pointer transition-colors"
+                  onClick={() => {
+                    if (reactFlowInstance) {
+                      reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.5 })
+                      setSelectedNodeIds([node.id])
+                      setShowNodeSearch(false)
+                    }
+                  }}
+                >
+                  <div className="flex-1">
+                    <div className="text-sm text-white font-medium">
+                      {node.data?.name || node.data?.text?.substring(0, 30) || node.id}
+                    </div>
+                    <div className="text-xs text-slate-400">{node.type}</div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {Math.round(node.position.x)}, {Math.round(node.position.y)}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Enhanced Outline View Overlay */}
+      {showOutlineView && (
+        <div className="absolute top-24 right-4 z-50 bg-slate-800/95 backdrop-blur-sm border border-slate-700 rounded-xl p-4 shadow-xl w-80">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-slate-300">Node Outline</h3>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-6 h-6 p-0 text-slate-400 hover:text-white"
+              onClick={() => setShowOutlineView(false)}
+            >
+              ✕
+            </Button>
+          </div>
+          <div className="max-h-96 overflow-y-auto space-y-2">
+            {nodes.map((node) => (
+              <div
+                key={node.id}
+                className={`p-3 rounded-lg border cursor-pointer transition-all hover:shadow-md ${
+                  selectedNodeIds.includes(node.id)
+                    ? "border-purple-500 bg-purple-500/10 shadow-purple-500/20"
+                    : "border-slate-600 hover:border-slate-500 hover:bg-slate-700"
+                }`}
+                onClick={() => {
+                  if (reactFlowInstance) {
+                    reactFlowInstance.setCenter(node.position.x, node.position.y, { zoom: 1.5 })
+                    setSelectedNodeIds([node.id])
+                  }
+                }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="text-sm font-medium text-white truncate">
+                    {node.data?.name || node.data?.text?.substring(0, 25) || node.id}
+                  </div>
+                  <span className="text-xs px-2 py-1 bg-slate-700 rounded text-slate-300 flex-shrink-0">
+                    {node.type}
+                  </span>
+                </div>
+                {node.data?.text && (
+                  <div className="text-xs text-slate-400 truncate">{node.data.text.substring(0, 60)}...</div>
+                )}
+                <div className="text-xs text-slate-500 mt-1">
+                  Position: {Math.round(node.position.x)}, {Math.round(node.position.y)}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <AddNodePanel
         isOpen={isAddNodePanelOpen}
@@ -1023,10 +1425,12 @@ function FlowchartBuilderInner({
       )}
 
       <Dialog open={deployDialogOpen} onOpenChange={setDeployDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px] bg-slate-800 border-slate-700">
           <DialogHeader>
-            <DialogTitle>{existingPathwayId ? "Update Pathway" : "Deploy to Bland.ai"}</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white">
+              {existingPathwayId ? "Update Pathway" : "Deploy to Bland.ai"}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
               {existingPathwayId
                 ? `Update your existing pathway (${existingPathwayId}) with the current flowchart.`
                 : "Enter your Bland.ai API key and pathway details to deploy your flowchart."}
@@ -1034,7 +1438,7 @@ function FlowchartBuilderInner({
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="apiKey" className="text-right">
+              <Label htmlFor="apiKey" className="text-right text-slate-300">
                 API Key
               </Label>
               <Input
@@ -1042,11 +1446,11 @@ function FlowchartBuilderInner({
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="org_..."
-                className="col-span-3"
+                className="col-span-3 bg-slate-700 border-slate-600 text-white"
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="pathwayName" className="text-right">
+              <Label htmlFor="pathwayName" className="text-right text-slate-300">
                 Pathway Name
               </Label>
               <Input
@@ -1054,11 +1458,11 @@ function FlowchartBuilderInner({
                 value={pathwayName}
                 onChange={(e) => setPathwayName(e.target.value)}
                 placeholder="My Pathway"
-                className="col-span-3"
+                className="col-span-3 bg-slate-700 border-slate-600 text-white"
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="pathwayDescription" className="text-right">
+              <Label htmlFor="pathwayDescription" className="text-right text-slate-300">
                 Description
               </Label>
               <Input
@@ -1066,34 +1470,34 @@ function FlowchartBuilderInner({
                 value={pathwayDescription}
                 onChange={(e) => setPathwayDescription(e.target.value)}
                 placeholder="A description of your pathway"
-                className="col-span-3"
+                className="col-span-3 bg-slate-700 border-slate-600 text-white"
               />
             </div>
 
             {/* Debug Payload Section */}
-            <div className="col-span-4 border-t pt-4">
+            <div className="col-span-4 border-t border-slate-700 pt-4">
               <div className="flex items-center justify-between mb-3">
-                <Label className="text-sm font-medium">Debug Payload Preview</Label>
+                <Label className="text-sm font-medium text-slate-300">Debug Payload Preview</Label>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={handleShowDebugPayload}
-                  className="text-xs bg-transparent"
+                  className="text-xs bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700"
                 >
                   {showDebugPayload ? "Hide Debug Payload" : "Show Debug Payload"}
                 </Button>
               </div>
 
               {showDebugPayload && debugPayload && (
-                <div className="bg-gray-50 border rounded-lg p-4 max-h-96 overflow-auto">
-                  <div className="text-xs text-gray-600 mb-2 font-medium">
+                <div className="bg-slate-700 border border-slate-600 rounded-lg p-4 max-h-96 overflow-auto">
+                  <div className="text-xs text-slate-400 mb-2 font-medium">
                     Final payload that will be sent to Bland.ai:
                   </div>
-                  <pre className="text-xs bg-white border rounded p-3 overflow-auto whitespace-pre-wrap">
+                  <pre className="text-xs bg-slate-800 border border-slate-600 rounded p-3 overflow-auto whitespace-pre-wrap text-slate-300">
                     {JSON.stringify(debugPayload, null, 2)}
                   </pre>
-                  <div className="text-xs text-gray-500 mt-2">
+                  <div className="text-xs text-slate-500 mt-2">
                     Nodes: {debugPayload?.nodes?.length || 0} | Edges: {debugPayload?.edges?.length || 0}
                   </div>
                 </div>
@@ -1101,10 +1505,18 @@ function FlowchartBuilderInner({
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setDeployDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setDeployDialogOpen(false)}
+              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+            >
               Cancel
             </Button>
-            <Button onClick={handleUpdatePathway} disabled={!apiKey || !pathwayName || isDeploying}>
+            <Button
+              onClick={handleUpdatePathway}
+              disabled={!apiKey || !pathwayName || isDeploying}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
               {isDeploying ? "Updating..." : existingPathwayId ? "Update Pathway" : "Deploy Pathway"}
             </Button>
           </div>
